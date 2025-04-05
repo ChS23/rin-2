@@ -1,5 +1,6 @@
 import datetime
 from dataclasses import dataclass, field
+import structlog
 
 from agents import Agent, Runner
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -8,6 +9,8 @@ from vkbottle.dispatch.rules import ABCRule
 from vkbottle.bot import Message, BotLabeler
 
 from src.bot import api
+
+logger = structlog.get_logger("handlers.checkin")
 
 
 @dataclass
@@ -93,10 +96,10 @@ end_of_day_agent = Agent(
 @labeler.message(ReplyToDaylyMessage())
 async def reply_to_dayly_message(message: Message):
     state.add_member_response(message.from_id, message.text)
-    print(f"Получен ответ от пользователя {message.from_id}: {message.text}")
+    await logger.ainfo("Пользователь ответил на полудневный чекин", user_id=message.from_id, text=message.text)
 
 
-@scheduler.scheduled_job(trigger=CronTrigger(hour=19, minute=10))
+@scheduler.scheduled_job(trigger=CronTrigger(hour=16, minute=10))
 async def end_of_day_checkin():
     users_info = []
     
@@ -109,7 +112,7 @@ async def end_of_day_checkin():
             else:
                 users_info.append(f"@id{user.id} ({user.first_name} {user.last_name}) - [пустой ответ]")
     
-    print(f"Собрана информация о пользователях: {users_info}")
+    await logger.ainfo("Информация о пользователях для вечернего чекаута", users_count=len(users_info), users_info=users_info)
     
     # Получаем текущий день для контекста
     current_day = datetime.datetime.now().strftime('%d.%m.%Y %A %B')
@@ -133,7 +136,7 @@ async def end_of_day_checkin():
     )
 
 
-@scheduler.scheduled_job(trigger=CronTrigger(hour=13, minute=10))
+@scheduler.scheduled_job(trigger=CronTrigger(hour=9, minute=10))
 async def midday_checkin():
     result = await Runner.run(midday_agent, f"Текущий день: {datetime.datetime.now().strftime('%d.%m.%Y %A %B')}")
     state.clear_members()
@@ -144,8 +147,9 @@ async def midday_checkin():
         random_id=0
     )
     state.dayly_message_id = message_id
-    print(f"Отправлено сообщение с ID: {message_id}")
+    await logger.ainfo("отправлено_сообщение_полудня", message_id=message_id)
 
 
 async def start_scheduler():
+    await logger.ainfo("Запуск планировщика", time=datetime.datetime.now().strftime('%d.%m.%Y %A %B'))
     scheduler.start()
