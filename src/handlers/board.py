@@ -4,6 +4,7 @@ from datetime import datetime
 
 import structlog
 from vkbottle.bot import Message, BotLabeler
+from vkbottle.dispatch.rules import ABCRule
 from vkbottle.tools import Keyboard, Text, TemplateElement, template_gen
 
 from src.bot import api
@@ -59,6 +60,12 @@ def get_next_id(board: dict[str, dict]) -> str:
 creation_state: dict[int, dict] = {}
 
 
+class InBoardCreation(ABCRule[Message]):
+    """Правило: пользователь в процессе создания запроса"""
+    async def check(self, event: Message) -> bool:
+        return event.from_id in creation_state
+
+
 def build_board_carousel(requests_dict: dict[str, dict], limit: int = 10) -> str | None:
     """Создать карусель запросов"""
     if not requests_dict:
@@ -106,14 +113,10 @@ async def start_create_request(message: Message):
     )
 
 
-@labeler.private_message()
+@labeler.private_message(InBoardCreation())
 async def handle_creation_steps(message: Message):
     """Обработка шагов создания запроса"""
     user_id = message.from_id
-
-    if user_id not in creation_state:
-        return
-
     state = creation_state[user_id]
     text = message.text.strip()
 
@@ -178,13 +181,12 @@ async def handle_creation_steps(message: Message):
         )
 
 
-@labeler.private_message(text="/отмена")
+@labeler.private_message(InBoardCreation(), text="/отмена")
 async def cancel_creation(message: Message):
     """Отменить создание"""
     user_id = message.from_id
-    if user_id in creation_state:
-        del creation_state[user_id]
-        await message.answer("Создание отменено")
+    del creation_state[user_id]
+    await message.answer("Создание отменено")
 
 
 @labeler.message(text="/доска")

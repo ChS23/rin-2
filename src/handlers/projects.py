@@ -4,6 +4,7 @@ from datetime import datetime
 
 import structlog
 from vkbottle.bot import Message, BotLabeler
+from vkbottle.dispatch.rules import ABCRule
 from vkbottle.tools import Keyboard, Text, OpenLink, TemplateElement, template_gen
 
 from src.bot import api
@@ -41,6 +42,12 @@ def get_next_id(projects: dict[str, dict]) -> str:
 creation_state: dict[int, dict] = {}
 
 
+class InProjectCreation(ABCRule[Message]):
+    """Правило: пользователь в процессе создания проекта"""
+    async def check(self, event: Message) -> bool:
+        return event.from_id in creation_state
+
+
 @labeler.private_message(text="/проект создать")
 async def start_create_project(message: Message):
     """Начать создание проекта (только в ЛС)"""
@@ -52,14 +59,10 @@ async def start_create_project(message: Message):
     )
 
 
-@labeler.private_message()
+@labeler.private_message(InProjectCreation())
 async def handle_creation_steps(message: Message):
     """Обработка шагов создания проекта"""
     user_id = message.from_id
-
-    if user_id not in creation_state:
-        return
-
     state = creation_state[user_id]
     text = message.text.strip()
 
@@ -125,13 +128,12 @@ async def handle_creation_steps(message: Message):
         )
 
 
-@labeler.private_message(text="/отмена")
+@labeler.private_message(InProjectCreation(), text="/отмена")
 async def cancel_creation(message: Message):
     """Отменить создание проекта"""
     user_id = message.from_id
-    if user_id in creation_state:
-        del creation_state[user_id]
-        await message.answer("Создание проекта отменено")
+    del creation_state[user_id]
+    await message.answer("Создание проекта отменено")
 
 
 def build_project_carousel(projects_dict: dict[str, dict], limit: int = 10) -> str | None:

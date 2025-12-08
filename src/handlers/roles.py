@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 import structlog
@@ -28,9 +29,26 @@ def save_roles(roles: dict[str, list[int]]) -> None:
         json.dump(roles, f, ensure_ascii=False, indent=2)
 
 
-def normalize_role(role: str) -> str:
-    """Нормализовать название роли (убрать окончания)"""
+# Паттерн для проверки валидного названия роли (только буквы, цифры, пробелы, дефисы)
+VALID_ROLE_PATTERN = re.compile(r'^[\w\s\-]+$', re.UNICODE)
+
+
+def normalize_role(role: str) -> str | None:
+    """Нормализовать название роли (убрать окончания). Вернёт None если роль невалидна."""
     role = role.lower().strip()
+
+    # Проверяем на запрещённые символы (теги, ссылки и т.д.)
+    if '@' in role or '[' in role or ']' in role or 'id' in role and any(c.isdigit() for c in role):
+        return None
+
+    # Проверяем что роль содержит только допустимые символы
+    if not VALID_ROLE_PATTERN.match(role):
+        return None
+
+    # Ограничиваем длину
+    if len(role) > 30:
+        return None
+
     # Убираем типичные окончания множественного числа
     if role.endswith("ы") or role.endswith("и"):
         role = role[:-1]
@@ -46,6 +64,9 @@ async def manage_role(message: Message, role: str):
     if role.startswith("-"):
         # Убрать роль
         role_name = normalize_role(role[1:])
+        if role_name is None:
+            await message.answer("Невалидное название роли")
+            return
         if role_name in roles and user_id in roles[role_name]:
             roles[role_name].remove(user_id)
             if not roles[role_name]:
@@ -58,6 +79,9 @@ async def manage_role(message: Message, role: str):
     else:
         # Добавить роль
         role_name = normalize_role(role)
+        if role_name is None:
+            await message.answer("Невалидное название роли (без @, ссылок, макс 30 символов)")
+            return
         if role_name not in roles:
             roles[role_name] = []
         if user_id not in roles[role_name]:
@@ -87,6 +111,10 @@ async def list_my_roles(message: Message):
 async def tag_role(message: Message, role: str):
     """Тегнуть всех с ролью"""
     role_name = normalize_role(role)
+    if role_name is None:
+        await message.answer("Невалидное название роли")
+        return
+
     roles = load_roles()
 
     if role_name not in roles or not roles[role_name]:
