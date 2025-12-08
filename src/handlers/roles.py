@@ -140,3 +140,26 @@ async def list_all_roles(message: Message):
 
     lines = [f"• {role}: {len(users)} чел." for role, users in roles.items()]
     await message.answer("Все роли:\n" + "\n".join(lines))
+
+
+@labeler.private_message(text="/роли_очистка")
+async def cleanup_invalid_roles(message: Message):
+    """Удалить невалидные роли (только в ЛС)"""
+    roles = load_roles()
+
+    if not roles:
+        await message.answer("Ролей нет")
+        return
+
+    invalid = []
+    for role_name in list(roles.keys()):
+        if normalize_role(role_name) is None or normalize_role(role_name) != role_name:
+            invalid.append(role_name)
+            del roles[role_name]
+
+    if invalid:
+        save_roles(roles)
+        await logger.ainfo("Удалены невалидные роли", roles=invalid, by=message.from_id)
+        await message.answer(f"Удалено {len(invalid)} невалидных ролей:\n" + "\n".join(f"• {r}" for r in invalid))
+    else:
+        await message.answer("Невалидных ролей не найдено")
