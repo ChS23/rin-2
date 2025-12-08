@@ -100,20 +100,6 @@ async def reply_to_dayly_message(message: Message):
     await logger.ainfo("Пользователь ответил на полудневный чекин", user_id=message.from_id, text=message.text)
 
 
-@labeler.message(text="/test_checkin")
-async def test_checkin(message: Message):
-    """Тестовая команда для проверки дневного чекина"""
-    result = await Runner.run(midday_agent, f"Текущий день: {datetime.datetime.now().strftime('%d.%m.%Y %A %B')}")
-
-    response = await api.messages.send(
-        peer_ids=[message.peer_id],
-        message=result.final_output,
-        random_id=0
-    )
-    state.dayly_message_id = response[0].conversation_message_id
-    await logger.ainfo("[TEST] conversation_message_id", message_id=state.dayly_message_id)
-
-
 @scheduler.scheduled_job(trigger=CronTrigger(hour=16, minute=10))
 async def end_of_day_checkin():
     users_info = []
