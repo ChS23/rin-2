@@ -1,7 +1,7 @@
-from . import event, checkin, roles, projects
+from . import event, checkin, roles, projects, board
 
 
-labelers = [event.labeler, checkin.labeler, roles.labeler, projects.labeler]
+labelers = [event.labeler, checkin.labeler, roles.labeler, projects.labeler, board.labeler]
 
 
 __all__ = ("labelers",)
