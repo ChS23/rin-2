@@ -66,6 +66,20 @@ class InBoardCreation(ABCRule[Message]):
         return event.from_id in creation_state
 
 
+class BoardViewPayload(ABCRule[Message]):
+    """Правило: нажата кнопка просмотра запроса"""
+    async def check(self, event: Message) -> dict | bool:
+        if event.payload:
+            import json
+            try:
+                payload = json.loads(event.payload) if isinstance(event.payload, str) else event.payload
+                if payload.get("cmd") == "board_view":
+                    return {"request_id": payload.get("id")}
+            except (json.JSONDecodeError, AttributeError):
+                pass
+        return False
+
+
 def build_board_carousel(requests_dict: dict[str, dict], limit: int = 10) -> str | None:
     """Создать карусель запросов"""
     if not requests_dict:
@@ -90,12 +104,29 @@ def build_board_carousel(requests_dict: dict[str, dict], limit: int = 10) -> str
                 title=f"{closed}{emoji} {r['title']}"[:80],
                 description=f"{desc}\n\n💰 {payment}"[:160],
                 buttons=Keyboard(inline=True)
-                    .add(Text(f"Подробнее #{rid}", payload={"cmd": "board", "id": rid}))
+                    .add(Text(f"👁 Подробнее", payload={"cmd": "board_view", "id": rid}))
                     .get_json()
             )
         )
 
     return template_gen(*elements) if elements else None
+
+
+def build_board_text(requests_dict: dict[str, dict], limit: int = 10) -> str:
+    """Текстовый список запросов (fallback)"""
+    lines = []
+    sorted_requests = sorted(
+        requests_dict.items(),
+        key=lambda x: (x[1].get("closed", False), -int(x[0]))
+    )[:limit]
+
+    for rid, r in sorted_requests:
+        type_name, emoji = REQUEST_TYPES.get(r["type"], ("другое", "📋"))
+        closed = "✅" if r.get("closed") else ""
+        payment = r.get("payment", "")
+        lines.append(f"{closed}{emoji} #{rid} {r['title'][:30]} — {payment}")
+
+    return "\n".join(lines)
 
 
 @labeler.private_message(text="/запрос")
@@ -189,6 +220,36 @@ async def cancel_creation(message: Message):
     await message.answer("Создание отменено")
 
 
+@labeler.message(BoardViewPayload())
+async def handle_board_view_button(message: Message, request_id: str):
+    """Обработка нажатия кнопки Подробнее"""
+    board = load_board()
+
+    if request_id not in board:
+        await message.answer(f"Запрос #{request_id} не найден")
+        return
+
+    r = board[request_id]
+    users = await api.users.get(user_ids=[r["author_id"]])
+    author = users[0] if users else None
+    author_name = f"{author.first_name} {author.last_name}" if author else "Неизвестно"
+
+    type_name, emoji = REQUEST_TYPES.get(r["type"], ("другое", "📋"))
+    closed = "✅ ЗАКРЫТ\n\n" if r.get("closed") else ""
+
+    text = (
+        f"{closed}Запрос #{request_id}\n\n"
+        f"{emoji} {type_name}\n"
+        f"📌 {r['title']}\n\n"
+        f"{r['description']}\n\n"
+        f"💰 Оплата: {r.get('payment', 'не указано')}\n"
+        f"👤 Автор: @id{r['author_id']} ({author_name})\n"
+        f"📅 Создан: {r['created_at']}"
+    )
+
+    await message.answer(text)
+
+
 @labeler.message(text="/доска")
 async def list_board(message: Message):
     """Показать всю доску (карусель)"""
@@ -205,7 +266,9 @@ async def list_board(message: Message):
     if carousel:
         await message.answer("📋 Доска запросов:", template=carousel)
     else:
-        await message.answer("Не удалось создать карусель")
+        # Fallback на текст
+        text = build_board_text(open_requests)
+        await message.answer(f"📋 Доска запросов:\n\n{text}\n\nПодробнее: /запрос <номер>")
 
 
 @labeler.message(text="/доска <filter_type>")
