@@ -511,10 +511,6 @@ class MentionsBot(ABCRule[Message]):
 
 @labeler.chat_message(MentionsBot())
 async def chat_with_rin(message: Message):
-    now = time.time()
-    if now - _user_cooldowns.get(message.from_id, 0) < COOLDOWN_SECONDS:
-        return
-
     text = message.text or ""
     text = re.sub(r'\[club\d+\|[^\]]*\]', '', text).strip()
     text = re.sub(r'@rinchan_bot', '', text, flags=re.IGNORECASE).strip()
@@ -550,9 +546,6 @@ async def chat_with_rin(message: Message):
     except Exception as e:
         await logger.aerror("Ошибка AI в чате", error=str(e))
         return
-
-    # Кулдаун ставим ПОСЛЕ успешного ответа
-    _user_cooldowns[message.from_id] = time.time()
 
     r = parse_response(result.final_output)
 
