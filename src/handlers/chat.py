@@ -34,7 +34,9 @@ CONTEXT_SIZE = 15
 SUMMARIZE_EVERY = 20  # каждые N сообщений сверх лимита — сжимаем
 MAX_FACTS_PER_USER = 10
 PASSIVE_REACTION_CHANCE = 0.08  # ~8% шанс пассивной реакции на сообщение
-_user_cooldowns: dict[int, float] = {}
+MAX_CONSECUTIVE_REPLIES = 3  # макс ответов подряд одному человеку
+_consecutive_replies: dict[int, int] = {}  # user_id -> count
+_last_replied_user: int = 0
 _chat_history: dict[int, deque] = {}
 _chat_summaries: dict[int, str] = {}  # peer_id -> саммари старых сообщений
 _chat_msg_counter: dict[int, int] = {}  # счётчик для триггера сжатия
@@ -84,7 +86,7 @@ RIN_LORE = """
     - Не обращайся на "вы"
     - Не будь приторной или слишком вежливой
     - Не начинай каждый ответ с "О," или "Ох,"
-    - Не ставь эмодзи в каждом предложении
+    - НЕ СТАВЬ эмодзи. Вообще. Никаких 😂😄😊🔥. Ты пишешь текстом, как нормальный человек в чате. Максимум — скобочка ) или )) если уместно
 """
 
 chat_agent = Agent(
@@ -511,6 +513,18 @@ class MentionsBot(ABCRule[Message]):
 
 @labeler.chat_message(MentionsBot())
 async def chat_with_rin(message: Message):
+    global _last_replied_user
+
+    # Лимит ответов подряд одному человеку
+    if message.from_id == _last_replied_user:
+        _consecutive_replies[message.from_id] = _consecutive_replies.get(message.from_id, 0) + 1
+        if _consecutive_replies[message.from_id] >= MAX_CONSECUTIVE_REPLIES:
+            return
+    else:
+        _last_replied_user = message.from_id
+        _consecutive_replies.clear()
+        _consecutive_replies[message.from_id] = 1
+
     text = message.text or ""
     text = re.sub(r'\[club\d+\|[^\]]*\]', '', text).strip()
     text = re.sub(r'@rinchan_bot', '', text, flags=re.IGNORECASE).strip()
