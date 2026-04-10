@@ -126,6 +126,8 @@ def parse_response(raw: str) -> RinResponse:
         raw = re.sub(r'^```(?:json)?\s*', '', raw)
         raw = re.sub(r'```\s*$', '', raw)
         raw = raw.strip()
+
+    # Попытка 1: весь ответ — JSON
     try:
         data = json.loads(raw)
         return RinResponse(
@@ -135,7 +137,25 @@ def parse_response(raw: str) -> RinResponse:
             forget=data.get("forget"),
         )
     except (json.JSONDecodeError, AttributeError):
-        return RinResponse(text=raw)
+        pass
+
+    # Попытка 2: JSON встроен в конце текста
+    match = re.search(r'\{[^{}]*"text"\s*:.*\}', raw, re.DOTALL)
+    if match:
+        try:
+            data = json.loads(match.group())
+            return RinResponse(
+                text=str(data.get("text", raw)),
+                reaction=data.get("reaction"),
+                remember=data.get("remember"),
+                forget=data.get("forget"),
+            )
+        except (json.JSONDecodeError, AttributeError):
+            pass
+
+    # Фолбек: plain text (убираем случайный JSON-мусор в конце)
+    clean = re.sub(r'\{[^{}]*"text"\s*:.*\}\s*$', '', raw, flags=re.DOTALL).strip()
+    return RinResponse(text=clean or raw)
 
 # Агент для инициативных сообщений (фича 4)
 initiative_agent = Agent(
