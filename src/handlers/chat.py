@@ -1,12 +1,13 @@
 import asyncio
 import json
+import os
 import random
 import re
 import time
 import datetime
-from collections import deque
 from pathlib import Path
 
+import redis.asyncio as aioredis
 import structlog
 from pydantic import BaseModel
 from vkbottle import BaseMiddleware
@@ -17,6 +18,8 @@ from agents import Agent, Runner
 
 from src.bot import api
 from src.handlers.checkin import ai_model, ai_lock, REACTIONS, scheduler, CHAT_PEER_ID
+
+rdb = aioredis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379"), decode_responses=True)
 
 
 class RinResponse(BaseModel):
@@ -37,9 +40,6 @@ PASSIVE_REACTION_CHANCE = 0.08  # ~8% шанс пассивной реакции
 REPLY_LIMIT = 5
 REPLY_WINDOW = 10 * 60  # 10 минут
 _user_reply_times: dict[int, list[float]] = {}  # user_id -> [timestamps]
-_chat_history: dict[int, deque] = {}
-_chat_summaries: dict[int, str] = {}  # peer_id -> саммари старых сообщений
-_chat_msg_counter: dict[int, int] = {}  # счётчик для триггера сжатия
 _user_names_cache: dict[int, str] = {}
 _memory_lock = asyncio.Lock()
 _passive_lock = asyncio.Lock()
@@ -403,57 +403,65 @@ async def resolve_user_name(user_id: int) -> str:
         return "???"
 
 
+def _history_key(peer_id: int) -> str:
+    return f"rin:chat:{peer_id}:history"
+
+def _summary_key(peer_id: int) -> str:
+    return f"rin:chat:{peer_id}:summary"
+
+def _counter_key(peer_id: int) -> str:
+    return f"rin:chat:{peer_id}:counter"
+
+
 async def record_message(peer_id: int, from_id: int, text: str):
     if not text:
         return
-    if peer_id not in _chat_history:
-        _chat_history[peer_id] = deque(maxlen=CONTEXT_SIZE)
-        _chat_msg_counter[peer_id] = 0
 
     if from_id == -GROUP_ID:
         name = "Рин"
     else:
         name = await resolve_user_name(from_id)
 
-    _chat_history[peer_id].append(f"{name}: {text}")
-    _chat_msg_counter[peer_id] = _chat_msg_counter.get(peer_id, 0) + 1
+    key = _history_key(peer_id)
+    await rdb.rpush(key, f"{name}: {text}")
+    await rdb.ltrim(key, -CONTEXT_SIZE, -1)
 
-    # Когда накопилось достаточно — сжимаем старое в саммари
-    if _chat_msg_counter[peer_id] >= SUMMARIZE_EVERY:
-        _chat_msg_counter[peer_id] = 0
+    count = await rdb.incr(_counter_key(peer_id))
+    if count >= SUMMARIZE_EVERY:
+        await rdb.set(_counter_key(peer_id), 0)
         await _compress_chat_history(peer_id)
 
 
 async def _compress_chat_history(peer_id: int):
     """Сжать текущую историю чата в саммари"""
-    if peer_id not in _chat_history:
-        return
-    messages = list(_chat_history[peer_id])
+    messages = await rdb.lrange(_history_key(peer_id), 0, -1)
     if not messages:
         return
 
-    old_summary = _chat_summaries.get(peer_id, "")
+    old_summary = await rdb.get(_summary_key(peer_id)) or ""
     prompt_parts = []
     if old_summary:
         prompt_parts.append(f"Предыдущее саммари:\n{old_summary}")
-    prompt_parts.append(f"Новые сообщения:\n" + "\n".join(messages))
+    prompt_parts.append("Новые сообщения:\n" + "\n".join(messages))
 
     try:
         async with ai_lock:
             result = await Runner.run(history_summary_agent, "\n\n".join(prompt_parts))
-        _chat_summaries[peer_id] = result.final_output.strip().strip('"')
-        await logger.ainfo("История чата сжата", peer_id=peer_id, summary=_chat_summaries[peer_id])
+        summary = result.final_output.strip().strip('"')
+        await rdb.set(_summary_key(peer_id), summary)
+        await logger.ainfo("История чата сжата", peer_id=peer_id, summary=summary)
     except Exception as e:
         await logger.awarn("Не удалось сжать историю", error=str(e))
 
 
-def get_context(peer_id: int) -> str:
+async def get_context(peer_id: int) -> str:
     parts = []
-    summary = _chat_summaries.get(peer_id)
+    summary = await rdb.get(_summary_key(peer_id))
     if summary:
         parts.append(f"Краткое содержание предыдущего разговора:\n{summary}")
-    if peer_id in _chat_history:
-        parts.append(f"Последние сообщения:\n" + "\n".join(_chat_history[peer_id]))
+    messages = await rdb.lrange(_history_key(peer_id), 0, -1)
+    if messages:
+        parts.append("Последние сообщения:\n" + "\n".join(messages))
     return "\n\n".join(parts)
 
 
@@ -578,7 +586,7 @@ async def chat_with_rin(message: Message):
     user_name = await resolve_user_name(message.from_id)
 
     # Собираем полный контекст
-    context = get_context(message.peer_id)
+    context = await get_context(message.peer_id)
     user_facts = get_user_memory(message.from_id)
     all_memory = get_all_memory_summary()
     community = get_community_context()
@@ -642,7 +650,7 @@ async def chat_with_rin(message: Message):
 @scheduler.scheduled_job(trigger="cron", hour=13, minute=30)
 async def rin_initiative():
     """Рин сама пишет в чат раз в день — заводит разговор"""
-    context = get_context(CHAT_PEER_ID)
+    context = await get_context(CHAT_PEER_ID)
     all_memory = get_all_memory_summary()
 
     prompt_parts = [f"Текущий день: {datetime.datetime.now().strftime('%d.%m.%Y %A')}"]
