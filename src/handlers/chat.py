@@ -19,7 +19,8 @@ from agents import Agent, Runner
 from src.bot import api
 from src.handlers.checkin import ai_model, ai_lock, REACTIONS, scheduler, CHAT_PEER_ID
 
-rdb = aioredis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379"), decode_responses=True)
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+rdb = aioredis.from_url(REDIS_URL, decode_responses=True)
 
 
 class RinResponse(BaseModel):
@@ -423,8 +424,11 @@ async def record_message(peer_id: int, from_id: int, text: str):
         name = await resolve_user_name(from_id)
 
     key = _history_key(peer_id)
-    await rdb.rpush(key, f"{name}: {text}")
+    line = f"{name}: {text}"
+    await rdb.rpush(key, line)
     await rdb.ltrim(key, -CONTEXT_SIZE, -1)
+    length = await rdb.llen(key)
+    await logger.adebug("Valkey: записано сообщение", key=key, length=length)
 
     count = await rdb.incr(_counter_key(peer_id))
     if count >= SUMMARIZE_EVERY:
