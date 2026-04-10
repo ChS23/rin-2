@@ -34,9 +34,9 @@ CONTEXT_SIZE = 15
 SUMMARIZE_EVERY = 20  # каждые N сообщений сверх лимита — сжимаем
 MAX_FACTS_PER_USER = 10
 PASSIVE_REACTION_CHANCE = 0.08  # ~8% шанс пассивной реакции на сообщение
-MAX_CONSECUTIVE_REPLIES = 3  # макс ответов подряд одному человеку
-_consecutive_replies: dict[int, int] = {}  # user_id -> count
-_last_replied_user: int = 0
+REPLY_LIMIT = 5
+REPLY_WINDOW = 10 * 60  # 10 минут
+_user_reply_times: dict[int, list[float]] = {}  # user_id -> [timestamps]
 _chat_history: dict[int, deque] = {}
 _chat_summaries: dict[int, str] = {}  # peer_id -> саммари старых сообщений
 _chat_msg_counter: dict[int, int] = {}  # счётчик для триггера сжатия
@@ -356,6 +356,36 @@ def get_community_context() -> str:
 #                      УТИЛИТЫ
 # ═══════════════════════════════════════════════════════════
 
+REPLY_LIMIT_PROMPT = """
+Когда тебе пишет один и тот же человек подряд, ты не обязана отвечать бесконечно — ты живая, у тебя свои дела.
+
+Сейчас тебе осталось {remaining} ответов этому человеку (из 5 за 10 минут).
+- 4-5: общайся как обычно.
+- 2-3: отвечай короче, можешь отвлекаться, терять интерес.
+- 1: сворачивай разговор естественно — "ладн, мне пора", "пойду", "потом доболтаем".
+- 0: это твоя последняя реплика. Попрощайся по-своему и уходи. Не объясняй лимиты — просто уходи как живой человек.
+
+Не упоминай счётчик, лимиты или то, что ты "бот". Ты просто устала или тебе стало скучно — это нормально.
+""".strip()
+
+
+def get_remaining_replies(user_id: int) -> int:
+    """Сколько ответов осталось этому пользователю в текущем окне"""
+    now = time.time()
+    times = _user_reply_times.get(user_id, [])
+    # Оставляем только те что в окне
+    times = [t for t in times if now - t < REPLY_WINDOW]
+    _user_reply_times[user_id] = times
+    return max(0, REPLY_LIMIT - len(times))
+
+
+def record_reply(user_id: int):
+    """Записать что ответили пользователю"""
+    if user_id not in _user_reply_times:
+        _user_reply_times[user_id] = []
+    _user_reply_times[user_id].append(time.time())
+
+
 MAX_NAME_CACHE = 500
 
 
@@ -533,20 +563,9 @@ class MentionsBot(ABCRule[Message]):
 
 @labeler.chat_message(MentionsBot())
 async def chat_with_rin(message: Message):
-    global _last_replied_user
-
-    # Лимит ответов подряд одному человеку
-    if message.from_id == _last_replied_user:
-        _consecutive_replies[message.from_id] = _consecutive_replies.get(message.from_id, 0) + 1
-        if _consecutive_replies[message.from_id] == MAX_CONSECUTIVE_REPLIES:
-            await message.answer("Ладно, я пока отойду, а то мы так до утра будем)")
-            return
-        elif _consecutive_replies[message.from_id] > MAX_CONSECUTIVE_REPLIES:
-            return
-    else:
-        _last_replied_user = message.from_id
-        _consecutive_replies.clear()
-        _consecutive_replies[message.from_id] = 1
+    remaining = get_remaining_replies(message.from_id)
+    if remaining <= 0:
+        return
 
     text = message.text or ""
     text = re.sub(r'\[club\d+\|[^\]]*\]', '', text).strip()
@@ -573,6 +592,7 @@ async def chat_with_rin(message: Message):
         prompt_parts.append(f"Инфо о сообществе:\n{community}")
     if context:
         prompt_parts.append(context)
+    prompt_parts.append(REPLY_LIMIT_PROMPT.format(remaining=remaining))
     prompt_parts.append(f"{user_name} обращается к тебе: {text}")
 
     prompt = "\n\n".join(prompt_parts)
@@ -584,6 +604,7 @@ async def chat_with_rin(message: Message):
         await logger.aerror("Ошибка AI в чате", error=str(e))
         return
 
+    record_reply(message.from_id)
     r = parse_response(result.final_output)
 
     await message.answer(r.text)
