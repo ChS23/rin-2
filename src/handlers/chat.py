@@ -473,6 +473,8 @@ class ChatHistoryMiddleware(BaseMiddleware[Message]):
         if msg.peer_id > 2000000000:
             if msg.text:
                 await record_message(msg.peer_id, msg.from_id, msg.text)
+                name = await resolve_user_name(msg.from_id) if msg.from_id > 0 else "бот"
+                await logger.adebug("Сообщение в чате", user=name, text=msg.text[:50])
             # Пассивные реакции (фичи 1, 3)
             if msg.from_id != -GROUP_ID and _check_passive_limit():
                 await _do_passive_reaction(msg)

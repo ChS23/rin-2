@@ -24,6 +24,9 @@ ai_model = OpenAIChatCompletionsModel(
     openai_client=ai_client,
 )
 
+import agents
+agents.set_tracing_disabled()
+
 ai_lock = asyncio.Lock()
 logger = structlog.get_logger("handlers.checkin")
 CHAT_PEER_ID = 2000000001  # chat_id=1 -> peer_id=2000000001
