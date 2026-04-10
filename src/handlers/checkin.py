@@ -25,7 +25,7 @@ ai_model = OpenAIChatCompletionsModel(
 )
 
 import agents
-agents.set_tracing_disabled()
+agents.set_tracing_disabled(True)
 
 ai_lock = asyncio.Lock()
 logger = structlog.get_logger("handlers.checkin")
