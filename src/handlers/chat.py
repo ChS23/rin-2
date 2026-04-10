@@ -538,7 +538,10 @@ async def chat_with_rin(message: Message):
     # Лимит ответов подряд одному человеку
     if message.from_id == _last_replied_user:
         _consecutive_replies[message.from_id] = _consecutive_replies.get(message.from_id, 0) + 1
-        if _consecutive_replies[message.from_id] >= MAX_CONSECUTIVE_REPLIES:
+        if _consecutive_replies[message.from_id] == MAX_CONSECUTIVE_REPLIES:
+            await message.answer("Ладно, я пока отойду, а то мы так до утра будем)")
+            return
+        elif _consecutive_replies[message.from_id] > MAX_CONSECUTIVE_REPLIES:
             return
     else:
         _last_replied_user = message.from_id
