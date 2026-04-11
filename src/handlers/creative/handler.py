@@ -114,6 +114,48 @@ async def run_creative_session():
         await logger.aerror("Creative: ошибка", error=str(e), exc_info=True)
 
 
+TRIGGER_KEY = "rin:creative:trigger"
+
+
+async def run_forced_session():
+    """Принудительный запуск — без проверки тишины и кулдауна."""
+    await logger.ainfo("Creative: принудительный запуск")
+    self_state = await get_rin_self_state()
+    prompt_parts = [f"Дата: {datetime.datetime.now().strftime('%d.%m.%Y %H:%M')}"]
+    if self_state:
+        prompt_parts.append("Твоё текущее состояние:\n" + "\n".join(f"- {s}" for s in self_state))
+    prompt_parts.append("Начни рабочую сессию над Частотой.")
+    prompt = "\n\n".join(prompt_parts)
+
+    try:
+        async with ai_lock:
+            result = await asyncio.wait_for(
+                Runner.run(creative_agent, prompt), timeout=600
+            )
+        output = result.final_output or ""
+        if output:
+            current = await get_rin_self_state()
+            summary = output[:200].strip()
+            if summary:
+                updated = current + [f"[creative] {summary}"]
+                if len(updated) > 15:
+                    updated = updated[-15:]
+                await update_rin_self_state(updated)
+        await logger.ainfo("Creative: сессия завершена", output=output[:500])
+    except asyncio.TimeoutError:
+        await logger.aerror("Creative: таймаут (600с)")
+    except Exception as e:
+        await logger.aerror("Creative: ошибка", error=str(e), exc_info=True)
+
+
+# Проверка триггера каждые 30 секунд
+@scheduler.scheduled_job(trigger="interval", seconds=30)
+async def check_creative_trigger():
+    trigger = await rdb.getdel(TRIGGER_KEY)
+    if trigger:
+        await run_forced_session()
+
+
 # Расписание: ночью в 1:00 и 3:00 (когда Рин по лору работает)
 @scheduler.scheduled_job(trigger="cron", hour=1, minute=0)
 async def creative_session_night_1():
