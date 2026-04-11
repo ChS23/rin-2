@@ -41,14 +41,18 @@ async def _upload_doc(peer_id: int, file_path: str) -> str | None:
     """Загрузить файл как документ VK и вернуть attachment string."""
     try:
         upload_server = await api.docs.get_messages_upload_server(peer_id=peer_id, type="doc")
+        await logger.adebug("Upload server получен", url=upload_server.upload_url)
         async with aiohttp.ClientSession() as session:
             with open(file_path, "rb") as f:
                 data = aiohttp.FormData()
                 data.add_field("file", f, filename=Path(file_path).name, content_type="application/octet-stream")
                 async with session.post(upload_server.upload_url, data=data) as resp:
-                    result = await resp.json(content_type=None)
+                    raw = await resp.text()
+                    await logger.adebug("Upload ответ", status=resp.status, body=raw[:300])
+                    result = orjson.loads(raw)
         saved = await api.docs.save(file=result["file"], title=Path(file_path).name)
         doc = saved.doc
+        await logger.ainfo("Файл загружен в VK", doc=f"doc{doc.owner_id}_{doc.id}")
         return f"doc{doc.owner_id}_{doc.id}"
     except Exception as e:
         await logger.awarn("Не удалось загрузить файл", error=str(e), path=file_path)
