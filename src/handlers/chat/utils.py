@@ -3,7 +3,7 @@ import re
 import orjson
 
 import structlog
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from src.bot import api
 
@@ -20,6 +20,21 @@ class RinResponse(BaseModel):
     remember: list[str] | None = None
     forget: list[str] | None = None
     self_update: list[str] | None = None
+
+    @field_validator("remember", "forget", "self_update", mode="before")
+    @classmethod
+    def coerce_str_list(cls, v):
+        if v is None:
+            return v
+        result = []
+        for item in v:
+            if isinstance(item, str):
+                result.append(item)
+            elif isinstance(item, dict):
+                result.append(next(iter(item.values()), str(item)))
+            else:
+                result.append(str(item))
+        return result
 
 
 async def resolve_user_name(user_id: int) -> str:
