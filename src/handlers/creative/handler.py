@@ -40,80 +40,53 @@ MIN_QUIET_MINUTES = 60       # минимум тишины в чате
 CREATIVE_COOLDOWN_HOURS = 3  # минимум между сессиями
 
 
+def _parse_valkey_ts(raw) -> datetime.datetime | None:
+    """Распарсить timestamp из Valkey (bytes или str)."""
+    if not raw:
+        return None
+    try:
+        return datetime.datetime.fromisoformat(raw if isinstance(raw, str) else raw.decode())
+    except (ValueError, TypeError, UnicodeDecodeError):
+        return None
+
+
 async def _chat_is_quiet(peer_id: int) -> bool:
     """Проверить что чат тихий уже MIN_QUIET_MINUTES минут."""
-    last_ts = await rdb.get(LAST_MSG_KEY.format(peer_id=peer_id))
-    if not last_ts:
+    last = _parse_valkey_ts(await rdb.get(LAST_MSG_KEY.format(peer_id=peer_id)))
+    if not last:
         return True
-    try:
-        last = datetime.datetime.fromisoformat(last_ts)
-        delta = datetime.datetime.now() - last
-        return delta.total_seconds() > MIN_QUIET_MINUTES * 60
-    except (ValueError, TypeError):
-        return True
+    return (datetime.datetime.now() - last).total_seconds() > MIN_QUIET_MINUTES * 60
 
 
 async def _can_run() -> bool:
     """Проверить кулдаун между сессиями."""
-    last_run = await rdb.get(CREATIVE_COOLDOWN_KEY)
-    if not last_run:
+    last = _parse_valkey_ts(await rdb.get(CREATIVE_COOLDOWN_KEY))
+    if not last:
         return True
-    try:
-        last = datetime.datetime.fromisoformat(last_run)
-        delta = datetime.datetime.now() - last
-        return delta.total_seconds() > CREATIVE_COOLDOWN_HOURS * 3600
-    except (ValueError, TypeError):
-        return True
+    return (datetime.datetime.now() - last).total_seconds() > CREATIVE_COOLDOWN_HOURS * 3600
 
 
-async def run_creative_session():
-    """Запустить одну creative сессию — Рин работает над Частотой."""
-    if not await _can_run():
-        await logger.ainfo("Creative: пропуск — кулдаун не прошёл")
-        return
-
-    if not await _chat_is_quiet(CHAT_PEER_ID):
-        await logger.ainfo("Creative: пропуск — чат активен")
-        return
-
+async def _build_prompt(extra: str = "") -> str:
+    """Собрать промпт для creative agent."""
     self_state = await get_rin_self_state()
-
-    prompt_parts = [
-        f"Дата: {datetime.datetime.now().strftime('%d.%m.%Y %H:%M')}",
-    ]
+    parts = [f"Дата: {datetime.datetime.now().strftime('%d.%m.%Y %H:%M')}"]
     if self_state:
-        prompt_parts.append(
-            "Твоё текущее состояние:\n" + "\n".join(f"- {s}" for s in self_state)
-        )
-    prompt_parts.append("Начни рабочую сессию над Частотой.")
+        parts.append("Твоё текущее состояние:\n" + "\n".join(f"- {s}" for s in self_state))
+    parts.append(extra or "Начни рабочую сессию над Частотой.")
+    return "\n\n".join(parts)
 
-    prompt = "\n\n".join(prompt_parts)
 
-    await logger.ainfo("Creative: начинаю сессию")
-
+async def _run_and_save(prompt: str, label: str):
+    """Запустить creative agent и сохранить результат в self_state."""
+    await logger.ainfo(f"Creative: {label}")
     try:
         async with ai_lock:
             result = await asyncio.wait_for(
-                Runner.run(creative_agent, prompt, run_config=_run_config, hooks=_hooks, max_turns=MAX_TURNS), timeout=900
+                Runner.run(creative_agent, prompt, run_config=_run_config, hooks=_hooks, max_turns=MAX_TURNS),
+                timeout=900,
             )
 
-        await rdb.set(
-            CREATIVE_COOLDOWN_KEY,
-            datetime.datetime.now().isoformat(),
-            ex=CREATIVE_COOLDOWN_HOURS * 3600 + 60,
-        )
-
         output = result.final_output or ""
-
-        # Логируем использованные инструменты
-        tool_names = []
-        for item in result.raw_responses:
-            if hasattr(item, "output") and hasattr(item.output, "tool_calls"):
-                for tc in item.output.tool_calls:
-                    if hasattr(tc, "function"):
-                        tool_names.append(tc.function.name)
-
-        # Обновляем self_state если агент что-то сделал
         if output:
             current = await get_rin_self_state()
             summary = output[:200].strip()
@@ -123,16 +96,25 @@ async def run_creative_session():
                     updated = updated[-15:]
                 await update_rin_self_state(updated)
 
-        await logger.ainfo(
-            "Creative: сессия завершена",
-            output=output[:500],
-            tools_used=tool_names[:20] if tool_names else None,
-        )
-
+        await logger.ainfo("Creative: сессия завершена", output=output[:500])
     except asyncio.TimeoutError:
-        await logger.aerror("Creative: таймаут (600с)")
+        await logger.aerror("Creative: таймаут (900с)")
     except Exception as e:
         await logger.aerror("Creative: ошибка", error=str(e), exc_info=True)
+
+
+async def run_creative_session():
+    """Запустить creative сессию с проверкой тишины и кулдауна."""
+    if not await _can_run():
+        await logger.ainfo("Creative: пропуск — кулдаун не прошёл")
+        return
+    if not await _chat_is_quiet(CHAT_PEER_ID):
+        await logger.ainfo("Creative: пропуск — чат активен")
+        return
+
+    prompt = await _build_prompt()
+    await _run_and_save(prompt, "начинаю сессию")
+    await rdb.set(CREATIVE_COOLDOWN_KEY, datetime.datetime.now().isoformat(), ex=CREATIVE_COOLDOWN_HOURS * 3600 + 60)
 
 
 TRIGGER_KEY = "rin:creative:trigger"
@@ -140,33 +122,8 @@ TRIGGER_KEY = "rin:creative:trigger"
 
 async def run_forced_session():
     """Принудительный запуск — без проверки тишины и кулдауна."""
-    await logger.ainfo("Creative: принудительный запуск")
-    self_state = await get_rin_self_state()
-    prompt_parts = [f"Дата: {datetime.datetime.now().strftime('%d.%m.%Y %H:%M')}"]
-    if self_state:
-        prompt_parts.append("Твоё текущее состояние:\n" + "\n".join(f"- {s}" for s in self_state))
-    prompt_parts.append("Начни рабочую сессию над Частотой.")
-    prompt = "\n\n".join(prompt_parts)
-
-    try:
-        async with ai_lock:
-            result = await asyncio.wait_for(
-                Runner.run(creative_agent, prompt, run_config=_run_config, hooks=_hooks, max_turns=MAX_TURNS), timeout=900
-            )
-        output = result.final_output or ""
-        if output:
-            current = await get_rin_self_state()
-            summary = output[:200].strip()
-            if summary:
-                updated = current + [f"[creative] {summary}"]
-                if len(updated) > 15:
-                    updated = updated[-15:]
-                await update_rin_self_state(updated)
-        await logger.ainfo("Creative: сессия завершена", output=output[:500])
-    except asyncio.TimeoutError:
-        await logger.aerror("Creative: таймаут (600с)")
-    except Exception as e:
-        await logger.aerror("Creative: ошибка", error=str(e), exc_info=True)
+    prompt = await _build_prompt()
+    await _run_and_save(prompt, "принудительный запуск")
 
 
 # Проверка триггера каждые 30 секунд (coalesce + misfire подавляют спам)
