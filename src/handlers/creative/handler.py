@@ -2,7 +2,7 @@ import asyncio
 import datetime
 
 import structlog
-from agents import Runner
+from agents import Runner, RunConfig, RunHooks, Agent, Tool
 
 from src.bot import rdb
 from src.handlers.checkin import ai_lock, scheduler, CHAT_PEER_ID
@@ -12,6 +12,26 @@ from src.handlers.chat.memory import (
 )
 
 logger = structlog.get_logger("creative.handler")
+
+
+class CreativeLoggingHooks(RunHooks):
+    async def on_agent_start(self, context, agent: Agent, **kwargs):
+        await logger.ainfo("Creative: агент запущен", agent=agent.name)
+
+    async def on_tool_start(self, context, agent: Agent, tool: Tool, **kwargs):
+        await logger.ainfo("Creative: вызов инструмента", agent=agent.name, tool=tool.name)
+
+    async def on_tool_end(self, context, agent: Agent, tool: Tool, result: str, **kwargs):
+        short = (result or "")[:200]
+        await logger.ainfo("Creative: инструмент завершён", tool=tool.name, result=short)
+
+    async def on_agent_end(self, context, agent: Agent, output, **kwargs):
+        short = str(output or "")[:200]
+        await logger.ainfo("Creative: агент завершён", agent=agent.name, output=short)
+
+
+_hooks = CreativeLoggingHooks()
+_run_config = RunConfig(tracing_disabled=True)
 
 LAST_MSG_KEY = "rin:chat:{peer_id}:last_msg_ts"
 CREATIVE_COOLDOWN_KEY = "rin:creative:last_run"
@@ -73,7 +93,7 @@ async def run_creative_session():
     try:
         async with ai_lock:
             result = await asyncio.wait_for(
-                Runner.run(creative_agent, prompt), timeout=600
+                Runner.run(creative_agent, prompt, run_config=_run_config, hooks=_hooks), timeout=600
             )
 
         await rdb.set(
@@ -130,7 +150,7 @@ async def run_forced_session():
     try:
         async with ai_lock:
             result = await asyncio.wait_for(
-                Runner.run(creative_agent, prompt), timeout=600
+                Runner.run(creative_agent, prompt, run_config=_run_config, hooks=_hooks), timeout=600
             )
         output = result.final_output or ""
         if output:
