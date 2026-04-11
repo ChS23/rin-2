@@ -19,6 +19,7 @@ class RinResponse(BaseModel):
     reaction: str | None = None
     remember: list[str] | None = None
     forget: list[str] | None = None
+    self_update: list[str] | None = None
 
 
 async def resolve_user_name(user_id: int) -> str:
@@ -51,6 +52,7 @@ def parse_response(raw) -> RinResponse:
             reaction=data.get("reaction"),
             remember=data.get("remember"),
             forget=data.get("forget"),
+            self_update=data.get("self_update"),
         )
     except (orjson.JSONDecodeError, AttributeError):
         pass
@@ -64,6 +66,7 @@ def parse_response(raw) -> RinResponse:
                 reaction=data.get("reaction"),
                 remember=data.get("remember"),
                 forget=data.get("forget"),
+                self_update=data.get("self_update"),
             )
         except (orjson.JSONDecodeError, AttributeError):
             pass

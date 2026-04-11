@@ -22,7 +22,7 @@ from src.handlers.chat.memory import (
     record_message, get_context,
     remember_facts, forget_facts, maybe_compress_memory,
     get_user_memory, get_all_memory_summary,
-    get_rin_self_state, refresh_rin_self_state,
+    get_rin_self_state, refresh_rin_self_state, update_rin_self_state,
     update_last_seen, get_days_since,
 )
 from src.handlers.chat.utils import (
@@ -254,6 +254,10 @@ async def chat_with_rin(message: Message):
     if r.remember:
         await remember_facts(message.from_id, user_name, r.remember)
         await maybe_compress_memory(message.from_id)
+    if r.self_update:
+        current = await get_rin_self_state()
+        merged = current + [s for s in r.self_update if s not in current]
+        await update_rin_self_state(merged)
 
     await update_last_seen(message.from_id)
 

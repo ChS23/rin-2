@@ -57,23 +57,71 @@ def read_url(url: str) -> str:
         return f"Не удалось прочитать: {e}"
 
 
+def _safe_path(filename: str) -> Path:
+    """Резолвить путь внутри SCRIPTS_DIR, не допуская выхода за пределы."""
+    parts = [p for p in Path(filename).parts if p not in ("", ".", "..")]
+    resolved = SCRIPTS_DIR.joinpath(*parts) if parts else SCRIPTS_DIR / "script.py"
+    # гарантируем что путь внутри SCRIPTS_DIR
+    resolved.relative_to(SCRIPTS_DIR)
+    return resolved
+
+
 @function_tool
 async def write_script(filename: str, content: str) -> str:
     """Написать Python или Ren'Py файл и прикрепить его к ответу.
-    filename — имя файла, например 'persistent_example.py' или 'scene_lab.rpy'.
+    filename — путь относительно папки скриптов, например 'scene_lab.rpy' или 'chastota/game/loop1.rpy'.
     content — полное содержимое файла."""
-    SCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
-    safe_name = filename.replace("/", "_").replace("..", "_").strip() or "script.py"
-    if not any(safe_name.endswith(ext) for ext in (".py", ".rpy", ".txt")):
-        safe_name += ".py"
-    safe_name = safe_name[-64:]
-    file_path = SCRIPTS_DIR / safe_name
+    try:
+        file_path = _safe_path(filename)
+    except ValueError:
+        return "Недопустимый путь файла"
+    if not any(file_path.suffix == ext for ext in (".py", ".rpy", ".txt")):
+        file_path = file_path.with_suffix(file_path.suffix + ".py")
+    file_path.parent.mkdir(parents=True, exist_ok=True)
     async with aiofiles.open(file_path, "w", encoding="utf-8") as f:
         await f.write(content)
     lines = len(content.splitlines())
+    rel = file_path.relative_to(SCRIPTS_DIR)
     await rdb.set(PENDING_FILE_KEY, str(file_path), ex=300)
-    await logger.ainfo("Файл создан", filename=safe_name, lines=lines, path=str(file_path))
-    return f"Файл {safe_name} готов ({lines} строк)"
+    await logger.ainfo("Файл создан", filename=str(rel), lines=lines, path=str(file_path))
+    return f"Файл {rel} готов ({lines} строк)"
 
 
-all_tools = [web_search, read_url, write_script]
+@function_tool
+async def read_script(filename: str) -> str:
+    """Прочитать ранее написанный файл скрипта.
+    filename — путь относительно папки скриптов, например 'chastota/game/loop1.rpy'."""
+    try:
+        file_path = _safe_path(filename)
+    except ValueError:
+        return "Недопустимый путь файла"
+    if not file_path.exists():
+        return f"Файл {filename} не найден"
+    try:
+        async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
+            content = await f.read()
+        if len(content) > 4000:
+            content = content[:4000] + "\n\n[...обрезано]"
+        return content
+    except Exception as e:
+        return f"Не удалось прочитать: {e}"
+
+
+@function_tool
+def list_scripts() -> str:
+    """Показать список всех написанных файлов скриптов."""
+    if not SCRIPTS_DIR.exists():
+        return "Файлов нет"
+    files = sorted(SCRIPTS_DIR.rglob("*"))
+    files = [f for f in files if f.is_file()]
+    if not files:
+        return "Файлов нет"
+    lines = []
+    for f in files:
+        rel = f.relative_to(SCRIPTS_DIR)
+        size = f.stat().st_size
+        lines.append(f"{rel} ({size} байт)")
+    return "\n".join(lines)
+
+
+all_tools = [web_search, read_url, write_script, read_script, list_scripts]
