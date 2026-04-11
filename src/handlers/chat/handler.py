@@ -2,7 +2,9 @@ import asyncio
 import datetime
 import random
 import re
+from pathlib import Path
 
+import aiohttp
 import orjson
 
 import structlog
@@ -15,6 +17,7 @@ from agents import Runner
 from src.bot import api, rdb
 from src.handlers.checkin import ai_lock, REACTIONS, scheduler, CHAT_PEER_ID
 from src.handlers.chat.agents import chat_agent, initiative_agent
+from src.handlers.chat.tools import _file_registry
 from src.handlers.chat.memory import (
     record_message, get_context,
     remember_facts, forget_facts, maybe_compress_memory,
@@ -32,6 +35,24 @@ logger = structlog.get_logger("chat.handler")
 labeler = BotLabeler()
 
 GROUP_ID = 204871130
+
+
+async def _upload_doc(peer_id: int, file_path: str) -> str | None:
+    """Загрузить файл как документ VK и вернуть attachment string."""
+    try:
+        upload_server = await api.docs.get_messages_upload_server(peer_id=peer_id, type="doc")
+        async with aiohttp.ClientSession() as session:
+            with open(file_path, "rb") as f:
+                data = aiohttp.FormData()
+                data.add_field("file", f, filename=Path(file_path).name, content_type="application/octet-stream")
+                async with session.post(upload_server.upload_url, data=data) as resp:
+                    result = await resp.json(content_type=None)
+        saved = await api.docs.save(file=result["file"], title=Path(file_path).name)
+        doc = saved.doc
+        return f"doc{doc.owner_id}_{doc.id}"
+    except Exception as e:
+        await logger.awarn("Не удалось загрузить файл", error=str(e), path=file_path)
+        return None
 PASSIVE_REACTION_CHANCE = 0.08
 MAX_PASSIVE_PER_DAY = 3
 _seen_messages: set[int] = set()
@@ -188,6 +209,9 @@ async def chat_with_rin(message: Message):
 
     prompt = "\n\n".join(prompt_parts)
 
+    current_task = asyncio.current_task()
+    task_id = id(current_task) if current_task else 0
+
     try:
         async with ai_lock:
             result = await asyncio.wait_for(Runner.run(chat_agent, prompt), timeout=60)
@@ -198,12 +222,16 @@ async def chat_with_rin(message: Message):
         await logger.aerror("Ошибка AI в чате", error=str(e))
         return
 
+    file_path = _file_registry.pop(task_id, None)
+    attachment = await _upload_doc(message.peer_id, file_path) if file_path else None
+
     await record_reply(message.from_id)
     r = parse_response(result.final_output)
 
     await api.messages.send(
         peer_id=message.peer_id,
         message=r.text,
+        attachment=attachment,
         forward=orjson.dumps({
             "peer_id": message.peer_id,
             "conversation_message_ids": [message.conversation_message_id],
@@ -242,6 +270,7 @@ async def chat_with_rin(message: Message):
         remembered=r.remember or None,
         done=r.done,
         reply_num=reply_count + 1,
+        attachment=attachment,
     )
 
 
