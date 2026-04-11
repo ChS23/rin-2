@@ -142,10 +142,11 @@ async def run_creative_session():
 TRIGGER_KEY = "rin:creative:trigger"
 
 
-async def run_forced_session():
+async def run_forced_session(task: str = ""):
     """Принудительный запуск — без проверки тишины и кулдауна."""
-    prompt = await _build_prompt()
-    await _run_and_save(prompt, "принудительный запуск")
+    extra = f"Задача из чата: {task}" if task and task != "1" else ""
+    prompt = await _build_prompt(extra)
+    await _run_and_save(prompt, f"принудительный запуск ({task[:50]})" if task else "принудительный запуск")
 
 
 # Проверка триггера каждые 30 секунд (coalesce + misfire подавляют спам)
@@ -154,9 +155,10 @@ async def run_forced_session():
     max_instances=1, coalesce=True, misfire_grace_time=60,
 )
 async def check_creative_trigger():
-    trigger = await rdb.getdel(TRIGGER_KEY)
-    if trigger:
-        await run_forced_session()
+    raw = await rdb.getdel(TRIGGER_KEY)
+    if raw:
+        task = raw.decode() if isinstance(raw, bytes) else str(raw)
+        await run_forced_session(task)
 
 
 # Расписание: ночью в 1:00 и 3:00 (когда Рин по лору работает)

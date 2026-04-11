@@ -106,16 +106,20 @@ _music_tool = music_agent.as_tool(
     tool_description="Сочинить и прикрепить музыкальный файл (.ogg). Передай описание нужного звука: настроение, сцена, атмосфера. Агент сам подберёт ноты и инструменты.",
 )
 
-from src.handlers.creative.agent import creative_agent  # noqa: E402
-_creative_tool = creative_agent.as_tool(
-    tool_name="work_on_chastota",
-    tool_description="Поработать над Частотой — написать сцену, сгенерировать фон, поправить код. Передай конкретную задачу: что сделать и почему (фидбек от участника чата). Займёт пару минут.",
-)
+from agents import function_tool as _ft  # noqa: E402
+from src.bot import rdb as _rdb  # noqa: E402
+
+@_ft
+async def work_on_chastota(task: str) -> str:
+    """Запланировать работу над Частотой. task — что сделать (фидбек, идея, правка).
+    Работа начнётся в фоне после ответа в чат. Используй когда согласна с предложением по проекту."""
+    await _rdb.set("rin:creative:trigger", task, ex=3600)
+    return "Приняла, сяду поработаю после ответа"
 
 chat_agent = Agent(
     model=ai_model,
     name="Рин",
-    tools=all_tools + [_music_tool, _creative_tool],
+    tools=all_tools + [_music_tool, work_on_chastota],
     instructions=f"""
     {RIN_LORE}
 
