@@ -23,7 +23,7 @@ from src.handlers.chat.utils import (
     get_reply_count, record_reply, mark_done, resolve_user_name,
     parse_response, get_community_context,
 )
-from src.handlers.chat.web import search_web, scrape_url, extract_urls
+from src.handlers.chat.web import search_web
 
 logger = structlog.get_logger("chat.handler")
 labeler = BotLabeler()
@@ -185,13 +185,6 @@ async def chat_with_rin(message: Message):
         prompt_parts.append(f"Инфо о сообществе:\n{community}")
     if context:
         prompt_parts.append(context)
-    # Веб-контекст: URL в сообщении → скрейпим
-    urls = extract_urls(text)
-    if urls:
-        page_content = await scrape_url(urls[0])
-        if page_content:
-            prompt_parts.append(f"Содержимое ссылки {urls[0]}:\n{page_content}")
-
     prompt_parts.append(REPLY_CONTEXT_PROMPT.format(reply_num=reply_count + 1))
     prompt_parts.append(f"{user_name} обращается к тебе: {text}")
 
