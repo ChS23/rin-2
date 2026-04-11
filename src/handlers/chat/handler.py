@@ -46,6 +46,9 @@ async def _upload_doc(peer_id: int, file_path: str) -> str | None:
                 async with session.post(upload_server.upload_url, data=data) as resp:
                     raw = await resp.text()
                     result = orjson.loads(raw)
+        if "file" not in result:
+            await logger.awarn("VK upload: нет поля file", response=raw[:300], path=file_path)
+            return None
         saved = await api.docs.save(file=result["file"], title=Path(file_path).name)
         doc = saved.doc
         await logger.ainfo("Файл загружен в VK", doc=f"doc{doc.owner_id}_{doc.id}")
