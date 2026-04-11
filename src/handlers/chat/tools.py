@@ -341,7 +341,7 @@ async def compose_midi(filename: str, bpm: int, tracks: list[MidiTrack], max_sec
 
     # FluidSynth → WAV (FluidSynth 2.1 не компрессирует OGG)
     proc = await asyncio.create_subprocess_exec(
-        "fluidsynth", "-ni", SOUNDFONT, str(mid_path),
+        "fluidsynth", "-ni", "-g", "1.5", SOUNDFONT, str(mid_path),
         "-F", str(wav_path), "-r", "44100",
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.PIPE,

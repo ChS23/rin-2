@@ -92,9 +92,10 @@ music_agent = Agent(
     - program 88 = synth pad (NewAge), 92 = atmosphere, 48 = strings, 51 = choir, 0 = piano
 
     ДЛЯ АТМОСФЕРЫ VN:
-    - Эмбиент/дрон: bpm 40-60, notes с dur 4-8, vel 10-30, program 88/92, квинты
-    - Тревожно: добавь секунду (pitch+1 или pitch+2), vel чуть выше
-    - Меланхолия: bpm 50-65, program 48 (strings), минорные трезвучия
+    - Эмбиент/дрон: bpm 40-60, notes с dur 4-8, vel 70-90, program 88/92, квинты
+    - Тревожно: добавь секунду (pitch+1 или pitch+2), vel 80-100
+    - Меланхолия: bpm 50-65, program 48 (strings), vel 75-90, минорные трезвучия
+    ВАЖНО: vel ниже 60 слишком тихо! Минимум vel=65 для любого звука.
 
     Верни только результат compose_midi — текст не нужен, инструмент сам прикрепит файл.
     """,
