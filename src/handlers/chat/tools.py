@@ -292,10 +292,10 @@ async def compose_midi(filename: str, bpm: int, tracks: list[MidiTrack], max_sec
     filename — имя без расширения, например 'drone_loop1'.
     bpm — темп (для эмбиента 40-70, для мелодии 80-120).
     tracks — список инструментов: [{"program": 48, "notes": [{"pitch": 48, "vel": 25, "beat": 0.0, "dur": 4.0}]}]
-    max_seconds — максимальная длина в секундах (по умолчанию 30, максимум 180 = 3 минуты).
+    max_seconds — максимальная длина в секундах (по умолчанию 30, от 30 до 180 = 3 минуты).
     Полезные program: 0=фортепиано, 40=скрипка, 48=струнные, 51=хор, 88=синт-пад, 92=атмосфера.
     pitch — нота MIDI (36=C2, 48=C3, 60=C4, 67=G4). vel — громкость 0-127. beat — начало в долях. dur — длительность в долях."""
-    max_seconds = max(5, min(180, max_seconds))
+    max_seconds = max(30, min(180, max_seconds))
     max_beat = max_seconds * bpm / 60.0
 
     ticks = 480
@@ -334,21 +334,35 @@ async def compose_midi(filename: str, bpm: int, tracks: list[MidiTrack], max_sec
 
     safe = filename.replace("/", "_").strip() or "music"
     mid_path = SCRIPTS_DIR / f"{safe}.mid"
+    wav_path = SCRIPTS_DIR / f"{safe}.wav"
     ogg_path = SCRIPTS_DIR / f"{safe}.ogg"
     mid_path.parent.mkdir(parents=True, exist_ok=True)
     mid.save(str(mid_path))
 
+    # FluidSynth → WAV (FluidSynth 2.1 не компрессирует OGG)
     proc = await asyncio.create_subprocess_exec(
         "fluidsynth", "-ni", SOUNDFONT, str(mid_path),
-        "-F", str(ogg_path), "-r", "44100",
+        "-F", str(wav_path), "-r", "44100",
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.PIPE,
     )
     _, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
     mid_path.unlink(missing_ok=True)
 
-    if not ogg_path.exists():
+    if not wav_path.exists():
         return f"Ошибка рендера FluidSynth: {stderr.decode()[:300]}"
+
+    # WAV → OGG через oggenc
+    proc2 = await asyncio.create_subprocess_exec(
+        "oggenc", str(wav_path), "-o", str(ogg_path), "-q", "3",
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    await asyncio.wait_for(proc2.communicate(), timeout=60)
+    wav_path.unlink(missing_ok=True)
+
+    if not ogg_path.exists():
+        return "Ошибка конвертации WAV → OGG"
 
     size_kb = ogg_path.stat().st_size // 1024
     await rdb.set(PENDING_FILE_KEY, str(ogg_path), ex=300)
