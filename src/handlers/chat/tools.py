@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+import aiofiles
 import structlog
 from agents import function_tool
 from firecrawl import FirecrawlApp
@@ -67,7 +68,8 @@ async def write_script(filename: str, content: str) -> str:
         safe_name += ".py"
     safe_name = safe_name[-64:]
     file_path = SCRIPTS_DIR / safe_name
-    file_path.write_text(content, encoding="utf-8")
+    async with aiofiles.open(file_path, "w", encoding="utf-8") as f:
+        await f.write(content)
     await rdb.set(PENDING_FILE_KEY, str(file_path), ex=300)
     return f"Файл {safe_name} готов ({len(content.splitlines())} строк)"
 
