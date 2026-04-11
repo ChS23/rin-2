@@ -1,5 +1,4 @@
 import os
-import re
 
 import structlog
 from agents import function_tool
@@ -20,17 +19,12 @@ def web_search(query: str) -> str:
         return "Поиск недоступен"
     try:
         results = _fc.search(query, limit=3)
-        if not results or not results.get("data"):
+        if not results.web:
             return "Ничего не найдено"
 
         parts = []
-        for item in results["data"][:3]:
-            title = item.get("title", "")
-            url = item.get("url", "")
-            content = item.get("markdown", item.get("description", ""))
-            if content and len(content) > 500:
-                content = content[:500] + "..."
-            parts.append(f"{title}\n{url}\n{content}")
+        for item in results.web[:3]:
+            parts.append(f"{item.title}\n{item.url}\n{item.description or ''}")
 
         return "\n\n".join(parts)
     except Exception as e:
@@ -44,8 +38,8 @@ def read_url(url: str) -> str:
     if not _fc:
         return "Чтение страниц недоступно"
     try:
-        result = _fc.scrape_url(url, formats=["markdown"])
-        md = result.get("markdown", "")
+        result = _fc.scrape(url, formats=["markdown"])
+        md = result.markdown or ""
         if not md:
             return "Не удалось прочитать страницу"
         if len(md) > MAX_CONTENT:
