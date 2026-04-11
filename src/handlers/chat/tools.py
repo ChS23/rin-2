@@ -1,4 +1,5 @@
 import os
+import zipfile
 from pathlib import Path
 
 import aiofiles
@@ -173,4 +174,42 @@ async def download_file(url: str, filename: str) -> str:
         return f"Не удалось скачать: {e}"
 
 
-all_tools = [web_search, read_url, write_script, read_script, list_scripts, download_file]
+@function_tool
+async def create_archive(filenames: list[str], archive_name: str) -> str:
+    """Упаковать несколько файлов в zip-архив и прикрепить к ответу.
+    filenames — список путей относительно папки скриптов (используй list_scripts чтобы узнать что есть).
+    archive_name — имя архива, например 'chastota_sounds.zip'."""
+    if not archive_name.endswith(".zip"):
+        archive_name += ".zip"
+    archive_path = SCRIPTS_DIR / archive_name.replace("/", "_")
+
+    missing = []
+    resolved = []
+    for name in filenames:
+        try:
+            p = _safe_path(name)
+            if not p.exists():
+                missing.append(name)
+            else:
+                resolved.append(p)
+        except ValueError:
+            missing.append(name)
+
+    if not resolved:
+        return "Ни один из файлов не найден: " + ", ".join(missing)
+
+    with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for p in resolved:
+            zf.write(p, p.relative_to(SCRIPTS_DIR))
+
+    size_kb = archive_path.stat().st_size // 1024
+    await rdb.set(PENDING_FILE_KEY, str(archive_path), ex=300)
+    await logger.ainfo("Архив создан", archive=archive_name, files=len(resolved), size_kb=size_kb)
+
+    result = f"Архив {archive_name} готов ({len(resolved)} файлов, {size_kb} KB)"
+    if missing:
+        result += f". Не найдено: {', '.join(missing)}"
+    return result
+
+
+all_tools = [web_search, read_url, write_script, read_script, list_scripts, download_file, create_archive]
