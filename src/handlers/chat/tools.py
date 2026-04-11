@@ -70,8 +70,10 @@ async def write_script(filename: str, content: str) -> str:
     file_path = SCRIPTS_DIR / safe_name
     async with aiofiles.open(file_path, "w", encoding="utf-8") as f:
         await f.write(content)
+    lines = len(content.splitlines())
     await rdb.set(PENDING_FILE_KEY, str(file_path), ex=300)
-    return f"Файл {safe_name} готов ({len(content.splitlines())} строк)"
+    await logger.ainfo("Файл создан", filename=safe_name, lines=lines, path=str(file_path))
+    return f"Файл {safe_name} готов ({lines} строк)"
 
 
 all_tools = [web_search, read_url, write_script]
