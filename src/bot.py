@@ -15,9 +15,10 @@ rdb = aioredis.from_url(
 
 def create_bot():
     from src.handlers.checkin import start_scheduler
+    from src.handlers.chat.memory import init_rin_self_state
 
     loop_wrapper = LoopWrapper(
-        on_startup=[start_scheduler()]
+        on_startup=[start_scheduler(), init_rin_self_state()]
     )
 
     bot = Bot(

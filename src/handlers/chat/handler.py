@@ -17,6 +17,8 @@ from src.handlers.chat.memory import (
     record_message, get_context,
     remember_facts, forget_facts, maybe_compress_memory,
     get_user_memory, get_all_memory_summary,
+    get_rin_self_state, refresh_rin_self_state,
+    update_last_seen, get_days_since,
 )
 from src.handlers.chat.utils import (
     REPLY_CONTEXT_PROMPT, HARD_REPLY_CAP,
@@ -157,14 +159,27 @@ async def chat_with_rin(message: Message):
 
     user_name = await resolve_user_name(message.from_id)
 
+    now = datetime.datetime.now()
     context = await get_context(message.peer_id)
     user_facts = get_user_memory(message.from_id)
     all_memory = get_all_memory_summary()
     community = get_community_context()
+    self_state = await get_rin_self_state()
+    days_since = await get_days_since(message.from_id)
 
-    prompt_parts = []
+    prompt_parts = [f"Сейчас: {now.strftime('%d.%m.%Y %H:%M, %A')}"]
+    if self_state:
+        prompt_parts.append("Твой текущий прогресс и состояние:\n" + "\n".join(f"- {s}" for s in self_state))
     if user_facts:
-        prompt_parts.append(f"Что ты помнишь о {user_name}:\n" + "\n".join(f"- {f}" for f in user_facts))
+        user_ctx = f"Что ты помнишь о {user_name}:\n" + "\n".join(f"- {f}" for f in user_facts)
+        if days_since is not None and days_since >= 7:
+            user_ctx += f"\n(Последний раз общались {days_since} дней назад)"
+        prompt_parts.append(user_ctx)
+    elif days_since is None:
+        # нет ни фактов, ни last_seen — точно первый раз
+        prompt_parts.append(f"({user_name} впервые пишет тебе)")
+    elif days_since >= 7:
+        prompt_parts.append(f"({user_name} не заходил {days_since} дней)")
     if all_memory:
         prompt_parts.append(f"Что ты помнишь о других участниках:\n{all_memory}")
     if community:
@@ -216,6 +231,8 @@ async def chat_with_rin(message: Message):
     if r.done:
         await mark_done(message.from_id)
 
+    await update_last_seen(message.from_id)
+
     await logger.ainfo("Рин ответила",
         user_id=message.from_id,
         user_name=user_name,
@@ -231,12 +248,24 @@ async def chat_with_rin(message: Message):
 #                    РИН ИНИЦИИРУЕТ
 # ═══════════════════════════════════════════════════════════
 
+@scheduler.scheduled_job(trigger="cron", hour=4, minute=0)
+async def rin_self_state_update():
+    """Обновляет собственное состояние Рин на основе истории чата за день"""
+    try:
+        await refresh_rin_self_state(CHAT_PEER_ID)
+    except Exception as e:
+        await logger.aerror("Ошибка обновления состояния Рин", error=str(e))
+
+
 @scheduler.scheduled_job(trigger="cron", hour=13, minute=30)
 async def rin_initiative():
     context = await get_context(CHAT_PEER_ID)
     all_memory = get_all_memory_summary()
+    self_state = await get_rin_self_state()
 
     prompt_parts = [f"Текущий день: {datetime.datetime.now().strftime('%d.%m.%Y %A')}"]
+    if self_state:
+        prompt_parts.append("Твой текущий прогресс и состояние:\n" + "\n".join(f"- {s}" for s in self_state))
     if all_memory:
         prompt_parts.append(f"Что ты помнишь об участниках:\n{all_memory}")
     if context:

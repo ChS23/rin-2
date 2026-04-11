@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import json
 from pathlib import Path
 
@@ -14,7 +15,8 @@ logger = structlog.get_logger("chat.memory")
 
 DATA_DIR = Path("/app/data")
 MEMORY_FILE = DATA_DIR / "rin_memory.json"
-CONTEXT_SIZE = 30
+HISTORY_SIZE = 100     # сколько хранить в Valkey
+CONTEXT_SIZE = 30      # сколько отдавать в промпт чата
 SUMMARIZE_EVERY = 40
 SUMMARIZE_THRESHOLD = 12
 MAX_FACTS_PER_USER = 10
@@ -141,7 +143,7 @@ async def record_message(peer_id: int, from_id: int, text: str, resolve_name):
 
     key = _history_key(peer_id)
     await rdb.rpush(key, f"{name}: {text}")
-    await rdb.ltrim(key, -CONTEXT_SIZE, -1)
+    await rdb.ltrim(key, -HISTORY_SIZE, -1)
     length = await rdb.llen(key)
     await logger.adebug("Valkey: записано сообщение", key=key, length=length)
 
@@ -177,7 +179,104 @@ async def get_context(peer_id: int) -> str:
     summary = await rdb.get(_summary_key(peer_id))
     if summary:
         parts.append(f"Краткое содержание предыдущего разговора:\n{summary}")
-    messages = await rdb.lrange(_history_key(peer_id), 0, -1)
+    messages = await rdb.lrange(_history_key(peer_id), -CONTEXT_SIZE, -1)
     if messages:
         parts.append("Последние сообщения:\n" + "\n".join(messages))
     return "\n\n".join(parts)
+
+
+# ═══════════════════════════════════════════════════════════
+#                 СОБСТВЕННЫЙ ЛОР РИН (Valkey)
+# ═══════════════════════════════════════════════════════════
+
+RIN_SELF_KEY = "rin:self:state"
+RIN_SELF_MAX = 15
+
+
+RIN_INITIAL_STATE = [
+    "Застряла на сцене во втором лупе, где Лена наконец понимает, что голос в эфире — это она сама. Пишу и удаляю уже пятый вариант — не могу поймать нужный тон. Это ключевая сцена всего проекта, и я слишком хорошо это понимаю.",
+    "Разобралась наконец, как хранить состояние радиоприёмника между лупами через persistent — оказалось, надо было просто не трогать default и сбрасывать вручную в нужный момент. Три дня потеряла, зато теперь механика лупа работает чисто.",
+    "Художница вышла из проекта ещё в ноябре, с тех пор работаю с тем, что есть: один готовый фон (метеостанция снаружи), два персонажа-болванки и мои собственные каракули в роли плейсхолдеров. Хочу выпустить демо в таком виде — думаю, атмосфера вытянет.",
+    "Звуковой дизайн в первом лупе получился именно таким, как я хотела: статика нарастает постепенно, почти незаметно, и люди на jam-плейтестах реально начинали нервничать к концу. Это лучшее, что я пока сделала в 'Частоте'.",
+    "Поставила себе цель: закончить черновик третьего лупа до конца месяца. Третий луп самый короткий по тексту, но самый сложный по структуре — там развязываются сразу три линии. Боюсь, но надо.",
+]
+
+
+async def init_rin_self_state():
+    """Засеять начальное состояние Рин если Valkey пуст"""
+    existing = await rdb.get(RIN_SELF_KEY)
+    if not existing:
+        await rdb.set(RIN_SELF_KEY, json.dumps(RIN_INITIAL_STATE, ensure_ascii=False))
+        await logger.ainfo("Начальное состояние Рин инициализировано")
+
+
+async def get_rin_self_state() -> list[str]:
+    """Получить текущее состояние/прогресс самой Рин"""
+    raw = await rdb.get(RIN_SELF_KEY)
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, list) else []
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+async def update_rin_self_state(new_state: list[str]):
+    """Перезаписать состояние Рин"""
+    trimmed = new_state[-RIN_SELF_MAX:]
+    await rdb.set(RIN_SELF_KEY, json.dumps(trimmed, ensure_ascii=False))
+
+
+async def refresh_rin_self_state(peer_id: int):
+    """Обновить состояние Рин на основе последней истории чата"""
+    from src.handlers.chat.agents import self_state_agent
+
+    messages = await rdb.lrange(_history_key(peer_id), 0, -1)
+    if not messages:
+        return
+
+    current = await get_rin_self_state()
+    prompt_parts = []
+    if current:
+        prompt_parts.append("Твоё текущее состояние:\n" + "\n".join(f"- {s}" for s in current))
+    else:
+        prompt_parts.append("Твоё текущее состояние: пусто (только начинаешь вести записи).")
+    prompt_parts.append("Последние сообщения из чата:\n" + "\n".join(messages))
+
+    try:
+        async with ai_lock:
+            result = await Runner.run(self_state_agent, "\n\n".join(prompt_parts))
+        raw = result.final_output.strip()
+        updated = json.loads(raw)
+        if isinstance(updated, list) and updated:
+            await update_rin_self_state([str(s) for s in updated])
+            await logger.ainfo("Состояние Рин обновлено", count=len(updated))
+    except Exception as e:
+        await logger.awarn("Не удалось обновить состояние Рин", error=str(e))
+
+
+# ═══════════════════════════════════════════════════════════
+#                    LAST SEEN (Valkey)
+# ═══════════════════════════════════════════════════════════
+
+def _last_seen_key(user_id: int) -> str:
+    return f"rin:user:{user_id}:last_seen"
+
+
+async def update_last_seen(user_id: int):
+    """Обновить дату последнего общения с пользователем"""
+    today = datetime.date.today().isoformat()
+    await rdb.set(_last_seen_key(user_id), today)
+
+
+async def get_days_since(user_id: int) -> int | None:
+    """Сколько дней прошло с последнего общения. None — если не видели раньше."""
+    raw = await rdb.get(_last_seen_key(user_id))
+    if not raw:
+        return None
+    try:
+        last = datetime.date.fromisoformat(raw)
+        return (datetime.date.today() - last).days
+    except ValueError:
+        return None
