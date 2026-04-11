@@ -119,6 +119,18 @@ def parse_response(raw) -> RinResponse:
         except (json.JSONDecodeError, AttributeError):
             pass
 
+    # Последний шанс — вытащить "text" напрямую регексом даже из невалидного JSON
+    text_match = re.search(r'"text"\s*:\s*"((?:[^"\\]|\\.)*)"', raw)
+    if text_match:
+        text = text_match.group(1).replace('\\"', '"').replace('\\n', '\n').replace('\\\\', '\\')
+        reaction_match = re.search(r'"reaction"\s*:\s*"([^"]+)"', raw)
+        done_match = re.search(r'"done"\s*:\s*(true|false)', raw)
+        return RinResponse(
+            text=text,
+            reaction=reaction_match.group(1) if reaction_match else None,
+            done=done_match.group(1) == "true" if done_match else False,
+        )
+
     clean = re.sub(r'\{[^{}]*"text"\s*:.*\}\s*$', '', raw, flags=re.DOTALL).strip()
     return RinResponse(text=clean or raw)
 
