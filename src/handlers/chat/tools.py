@@ -271,10 +271,10 @@ async def compose_midi(filename: str, bpm: int, tracks: list[MidiTrack], max_sec
     filename — имя без расширения, например 'drone_loop1'.
     bpm — темп (для эмбиента 40-70, для мелодии 80-120).
     tracks — список инструментов: [{"program": 48, "notes": [{"pitch": 48, "vel": 25, "beat": 0.0, "dur": 4.0}]}]
-    max_seconds — максимальная длина в секундах (по умолчанию 30, максимум 120).
+    max_seconds — максимальная длина в секундах (по умолчанию 30, максимум 180 = 3 минуты).
     Полезные program: 0=фортепиано, 40=скрипка, 48=струнные, 51=хор, 88=синт-пад, 92=атмосфера.
     pitch — нота MIDI (36=C2, 48=C3, 60=C4, 67=G4). vel — громкость 0-127. beat — начало в долях. dur — длительность в долях."""
-    max_seconds = max(5, min(120, max_seconds))
+    max_seconds = max(5, min(180, max_seconds))
     max_beat = max_seconds * bpm / 60.0
 
     ticks = 480
