@@ -1,15 +1,17 @@
 import asyncio
 import datetime
+import random
 
 import structlog
 from agents import Runner, RunConfig, RunHooks, Agent, Tool
 
-from src.bot import rdb
+from src.bot import api, rdb
 from src.handlers.checkin import ai_lock, scheduler, CHAT_PEER_ID
 from src.handlers.creative.agent import creative_agent
 from src.handlers.chat.memory import (
-    get_rin_self_state, update_rin_self_state,
+    get_rin_self_state, update_rin_self_state, record_message,
 )
+from src.handlers.chat.utils import resolve_user_name
 
 logger = structlog.get_logger("creative.handler")
 
@@ -76,7 +78,23 @@ async def _build_prompt(extra: str = "") -> str:
     return "\n\n".join(parts)
 
 
-async def _run_and_save(prompt: str, label: str):
+GROUP_ID = 204871130
+
+
+async def _post_to_chat(text: str):
+    """Отправить результат creative сессии в чат."""
+    try:
+        await api.messages.send(
+            peer_ids=[CHAT_PEER_ID],
+            message=text,
+            random_id=random.getrandbits(31),
+        )
+        await record_message(CHAT_PEER_ID, -GROUP_ID, text, resolve_user_name)
+    except Exception as e:
+        await logger.awarn("Creative: не удалось отправить в чат", error=str(e))
+
+
+async def _run_and_save(prompt: str, label: str, post_result: bool = True):
     """Запустить creative agent и сохранить результат в self_state."""
     await logger.ainfo(f"Creative: {label}")
     try:
@@ -95,6 +113,10 @@ async def _run_and_save(prompt: str, label: str):
                 if len(updated) > 15:
                     updated = updated[-15:]
                 await update_rin_self_state(updated)
+
+            # Отправляем краткий итог в чат
+            if post_result and summary:
+                await _post_to_chat(summary)
 
         await logger.ainfo("Creative: сессия завершена", output=output[:500])
     except asyncio.TimeoutError:
