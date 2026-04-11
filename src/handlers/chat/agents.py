@@ -106,10 +106,16 @@ _music_tool = music_agent.as_tool(
     tool_description="Сочинить и прикрепить музыкальный файл (.ogg). Передай описание нужного звука: настроение, сцена, атмосфера. Агент сам подберёт ноты и инструменты.",
 )
 
+from src.handlers.creative.agent import creative_agent  # noqa: E402
+_creative_tool = creative_agent.as_tool(
+    tool_name="work_on_chastota",
+    tool_description="Поработать над Частотой — написать сцену, сгенерировать фон, поправить код. Передай конкретную задачу: что сделать и почему (фидбек от участника чата). Займёт пару минут.",
+)
+
 chat_agent = Agent(
     model=ai_model,
     name="Рин",
-    tools=all_tools + [_music_tool],
+    tools=all_tools + [_music_tool, _creative_tool],
     instructions=f"""
     {RIN_LORE}
 
@@ -144,6 +150,7 @@ chat_agent = Agent(
     - send_file: прикрепить уже существующий файл к ответу. Используй когда просят скинуть/переслать файл который ты уже создавала (сначала list_scripts чтобы проверить имя).
     - compose_music: сочинить музыку и прикрепить как .ogg — просто опиши настроение/сцену ("грустный арктический дрон", "тревожный эмбиент для второго лупа"). Отдельный агент сам подберёт ноты.
     - generate_image: сгенерировать картинку. ВАЖНО: description пиши ТОЛЬКО НА АНГЛИЙСКОМ как подробный промпт для нейросети Flux. Правила промпта: естественный язык (не теги), 30-80 слов, начинай с субъекта, потом окружение, стиль, освещение. Пример: description="a lonely arctic weather station at night, aurora borealis painting the sky green, warm light from a single window, snow drifts around the building, wide shot, soft ambient glow". Стиль: 'anime' для персонажей, 'digital art' для сцен, 'pixel art' для ретро, 'watercolor' для мягкого, 'photo' для реализма. Если просят ТВОЁ фото/селфи — ставь selfie=true и опиши только обстановку и позу (description="sitting at desk late at night, laptop screen glow on face, tired but focused, messy room with papers", selfie=true, style="anime"). Если генерируешь фон/спрайт для игры — сохраняй в папку проекта через filename: filename="chastota/game/images/bg_station_night.png".
+    - work_on_chastota: поработать над Частотой по фидбеку из чата. Используй когда кто-то даёт конкретное предложение по проекту и ты согласна с ним. Передай что именно сделать ("добавить сцену в радиорубке где Марина слышит голос", "поправить диалог Кирилла — слишком формально"). НЕ используй просто так — только если фидбек осмысленный и ты реально хочешь это внести. Займёт пару минут.
     - create_archive: упаковать несколько своих файлов в zip и прикрепить. Сначала list_scripts — потом сама решаешь что включить. Используй когда просят прислать всё или несколько файлов сразу.
     - download_file: скачать файл по прямой ссылке и прикрепить к ответу. Поддерживает аудио (.ogg/.mp3/.wav/.flac), картинки (.png/.jpg/.gif/.webp), документы (.pdf/.txt), архивы (.zip). Используй когда просят найти и прислать файл — сначала web_search чтобы найти прямую ссылку, потом download_file. Хорошие источники: OpenGameArt.org (прямые CDN-ссылки), GitHub releases, archive.org. Freesound.org требует авторизацию — там прямые ссылки не работают, ищи альтернативы.
 
