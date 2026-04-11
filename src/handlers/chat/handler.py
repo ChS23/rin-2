@@ -168,7 +168,12 @@ async def chat_with_rin(message: Message):
     record_reply(message.from_id)
     r = parse_response(result.final_output)
 
-    await message.answer(r.text)
+    await api.messages.send(
+        peer_id=message.peer_id,
+        message=r.text,
+        reply_to=message.id,
+        random_id=random.getrandbits(31),
+    )
     await record_message(message.peer_id, -GROUP_ID, r.text, resolve_user_name)
 
     if r.reaction and r.reaction in REACTIONS:

@@ -17,8 +17,8 @@ rdb = aioredis.from_url(REDIS_URL, decode_responses=True)
 
 DATA_DIR = Path("/app/data")
 MEMORY_FILE = DATA_DIR / "rin_memory.json"
-CONTEXT_SIZE = 15
-SUMMARIZE_EVERY = 20
+CONTEXT_SIZE = 30
+SUMMARIZE_EVERY = 40
 SUMMARIZE_THRESHOLD = 12
 MAX_FACTS_PER_USER = 10
 
