@@ -1,5 +1,7 @@
 import asyncio
 import os
+import re
+import urllib.parse
 import zipfile
 from pathlib import Path
 
@@ -354,5 +356,60 @@ async def compose_midi(filename: str, bpm: int, tracks: list[MidiTrack], max_sec
     return f"Файл {safe}.ogg готов ({size_kb} KB)"
 
 
-all_tools = [web_search, read_url, write_script, edit_file, read_script, list_scripts, send_file, download_file, create_archive]
+POLLINATIONS_URL = "https://image.pollinations.ai/prompt/{prompt}"
+
+# Фиксированная внешность Рин для консистентных "селфи"
+RIN_APPEARANCE = (
+    "young woman, early 20s, messy dark brown shoulder-length hair with side bangs, "
+    "tired dark eyes with slight eye bags, pale skin, thin build, "
+    "wearing an oversized dark hoodie, no makeup, "
+    "small silver earring in left ear, chipped black nail polish"
+)
+
+
+@function_tool
+async def generate_image(description: str, style: str = "digital art", selfie: bool = False) -> str:
+    """Сгенерировать картинку по описанию и прикрепить к ответу.
+    description — описание на любом языке, например 'арктическая метеостанция ночью' или 'кот в скафандре'.
+    style — стиль: 'digital art', 'anime', 'watercolor', 'photo', 'pixel art', 'oil painting' (по умолчанию digital art).
+    selfie — если True, на картинке будешь ты (Рин). Используй когда просят фото/селфи/как ты выглядишь.
+    Промпт будет автоматически улучшен для лучшего результата."""
+    # Если селфи — подмешиваем фиксированную внешность Рин
+    if selfie:
+        raw_prompt = f"{style} style, {RIN_APPEARANCE}, {description}"
+    else:
+        raw_prompt = f"{style} style, {description}"
+    encoded = urllib.parse.quote(raw_prompt)
+
+    url = POLLINATIONS_URL.format(prompt=encoded)
+    params = "width=1024&height=1024&nologo=true&enhance=true&safe=true"
+    full_url = f"{url}?{params}"
+
+    safe_name = re.sub(r'[^\w\s-]', '', description[:40]).strip().replace(' ', '_') or "image"
+    file_path = SCRIPTS_DIR / f"{safe_name}.png"
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(full_url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                if resp.status != 200:
+                    return f"Ошибка генерации: HTTP {resp.status}"
+                data = await resp.read()
+                if len(data) < 1000:
+                    return "Получена пустая или слишком маленькая картинка"
+
+        async with aiofiles.open(file_path, "wb") as f:
+            await f.write(data)
+
+        size_kb = len(data) // 1024
+        await rdb.set(PENDING_FILE_KEY, str(file_path), ex=300)
+        await logger.ainfo("Картинка сгенерирована", filename=safe_name, size_kb=size_kb, style=style)
+        return f"Картинка {safe_name}.png готова ({size_kb} KB)"
+    except asyncio.TimeoutError:
+        return "Таймаут генерации картинки (>60с)"
+    except Exception as e:
+        return f"Ошибка: {e}"
+
+
+all_tools = [web_search, read_url, write_script, edit_file, read_script, list_scripts, send_file, download_file, create_archive, generate_image]
 music_tools = [compose_midi]
