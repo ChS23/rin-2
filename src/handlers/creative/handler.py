@@ -6,6 +6,7 @@ import structlog
 from agents import Runner, RunConfig, RunHooks, Agent, Tool
 
 from vkbottle.bot import Message, BotLabeler
+from vkbottle.tools import Keyboard, Text, KeyboardButtonColor
 
 from src.bot import api, rdb
 from src.handlers.checkin import ai_lock, scheduler, CHAT_PEER_ID
@@ -194,59 +195,98 @@ async def creative_session_night_2():
 
 
 # ═══════════════════════════════════════════════════════════
-#              ЛС КОМАНДЫ ДЛЯ ТЕСТИРОВАНИЯ (admin only)
+#              ЛС ПАНЕЛЬ УПРАВЛЕНИЯ (admin only)
 # ═══════════════════════════════════════════════════════════
 
-@labeler.private_message(text="/creative run")
-async def dm_creative_run(message: Message):
+def _admin_keyboard():
+    return (
+        Keyboard(one_time=False)
+        .add(Text("Роадмап"), KeyboardButtonColor.PRIMARY)
+        .add(Text("Файлы"), KeyboardButtonColor.PRIMARY)
+        .add(Text("Lint"), KeyboardButtonColor.PRIMARY)
+        .row()
+        .add(Text("Запустить сессию"), KeyboardButtonColor.POSITIVE)
+        .add(Text("Web билд"), KeyboardButtonColor.POSITIVE)
+        .row()
+        .add(Text("Статус"), KeyboardButtonColor.SECONDARY)
+    ).get_json()
+
+
+@labeler.private_message(text="Роадмап")
+async def dm_roadmap(message: Message):
     if message.from_id != ADMIN_ID:
         return
-    await message.answer("Запускаю creative сессию...")
+    from src.handlers.creative.tools import read_roadmap
+    await message.answer(read_roadmap()[:4000], keyboard=_admin_keyboard())
+
+
+@labeler.private_message(text="Файлы")
+async def dm_files(message: Message):
+    if message.from_id != ADMIN_ID:
+        return
+    from src.handlers.creative.tools import list_scripts
+    await message.answer(list_scripts()[:4000], keyboard=_admin_keyboard())
+
+
+@labeler.private_message(text="Lint")
+async def dm_lint(message: Message):
+    if message.from_id != ADMIN_ID:
+        return
+    from src.handlers.creative.tools import renpy_lint
+    await message.answer("Запускаю lint...")
+    result = await renpy_lint()
+    await message.answer(result[:4000], keyboard=_admin_keyboard())
+
+
+@labeler.private_message(text="Запустить сессию")
+async def dm_run(message: Message):
+    if message.from_id != ADMIN_ID:
+        return
+    await message.answer("Запускаю creative сессию...", keyboard=_admin_keyboard())
     await run_forced_session()
-    await message.answer("Сессия завершена.")
+    await message.answer("Сессия завершена.", keyboard=_admin_keyboard())
 
 
-@labeler.private_message(text="/creative run <task>")
-async def dm_creative_run_task(message: Message, task: str):
-    if message.from_id != ADMIN_ID:
-        return
-    await message.answer(f"Запускаю: {task}")
-    await run_forced_session(task)
-    await message.answer("Сессия завершена.")
-
-
-@labeler.private_message(text="/creative web")
-async def dm_creative_web(message: Message):
+@labeler.private_message(text="Web билд")
+async def dm_web(message: Message):
     if message.from_id != ADMIN_ID:
         return
     await message.answer("Собираю веб-билд...")
     from src.handlers.creative.tools import renpy_web_build
     result = await renpy_web_build()
-    await message.answer(result)
+    await message.answer(result[:4000], keyboard=_admin_keyboard())
 
 
-@labeler.private_message(text="/creative lint")
-async def dm_creative_lint(message: Message):
+@labeler.private_message(text="Статус")
+async def dm_status(message: Message):
     if message.from_id != ADMIN_ID:
         return
-    from src.handlers.creative.tools import renpy_lint
-    result = await renpy_lint()
-    await message.answer(result[:4000])
+    state = await get_rin_self_state()
+    cooldown = _parse_valkey_ts(await rdb.get(CREATIVE_COOLDOWN_KEY))
+    last_msg = _parse_valkey_ts(await rdb.get(LAST_MSG_KEY.format(peer_id=CHAT_PEER_ID)))
+
+    parts = ["=== Creative Status ==="]
+    if cooldown:
+        parts.append(f"Последняя сессия: {cooldown.strftime('%H:%M:%S')}")
+    if last_msg:
+        parts.append(f"Последнее сообщение в чате: {last_msg.strftime('%H:%M:%S')}")
+    parts.append(f"Тишина: {'да' if await _chat_is_quiet(CHAT_PEER_ID) else 'нет'}")
+    parts.append(f"Кулдаун пройден: {'да' if await _can_run() else 'нет'}")
+    if state:
+        creative_state = [s for s in state if "[creative]" in s]
+        if creative_state:
+            parts.append(f"\nПоследнее из creative:\n" + "\n".join(creative_state[-3:]))
+    await message.answer("\n".join(parts), keyboard=_admin_keyboard())
 
 
-@labeler.private_message(text="/creative roadmap")
-async def dm_creative_roadmap(message: Message):
+@labeler.private_message()
+async def dm_free_input(message: Message):
+    """Свободный ввод — запускает creative сессию с задачей."""
     if message.from_id != ADMIN_ID:
         return
-    from src.handlers.creative.tools import read_roadmap
-    result = read_roadmap()
-    await message.answer(result[:4000])
-
-
-@labeler.private_message(text="/creative files")
-async def dm_creative_files(message: Message):
-    if message.from_id != ADMIN_ID:
+    text = (message.text or "").strip()
+    if not text:
         return
-    from src.handlers.creative.tools import list_scripts
-    result = list_scripts()
-    await message.answer(result[:4000])
+    await message.answer(f"Запускаю задачу: {text[:100]}", keyboard=_admin_keyboard())
+    await run_forced_session(text)
+    await message.answer("Готово.", keyboard=_admin_keyboard())
