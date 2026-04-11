@@ -1,5 +1,6 @@
-import json
 import re
+
+import orjson
 from pathlib import Path
 
 import structlog
@@ -19,8 +20,7 @@ def load_roles() -> dict[str, list[int]]:
     """Загрузить роли из файла"""
     if not ROLES_FILE.exists():
         return {}
-    with open(ROLES_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+    return orjson.loads(ROLES_FILE.read_bytes())
 
 
 def save_roles(roles: dict[str, list[int]]) -> None:

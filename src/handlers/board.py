@@ -1,5 +1,6 @@
-import json
 import time
+
+import orjson
 from pathlib import Path
 from datetime import datetime
 
@@ -40,8 +41,7 @@ def load_board() -> dict[str, dict]:
     """Загрузить доску из файла"""
     if not BOARD_FILE.exists():
         return {}
-    with open(BOARD_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+    return orjson.loads(BOARD_FILE.read_bytes())
 
 
 def save_board(board: dict[str, dict]) -> None:
@@ -70,12 +70,11 @@ class BoardViewPayload(ABCRule[Message]):
     """Правило: нажата кнопка просмотра запроса"""
     async def check(self, event: Message) -> dict | bool:
         if event.payload:
-            import json
             try:
-                payload = json.loads(event.payload) if isinstance(event.payload, str) else event.payload
+                payload = orjson.loads(event.payload) if isinstance(event.payload, str) else event.payload
                 if payload.get("cmd") == "board_view":
                     return {"request_id": payload.get("id")}
-            except (json.JSONDecodeError, AttributeError):
+            except (orjson.JSONDecodeError, AttributeError):
                 pass
         return False
 

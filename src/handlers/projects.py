@@ -1,5 +1,6 @@
-import json
 import time
+
+import orjson
 from pathlib import Path
 from datetime import datetime
 
@@ -22,8 +23,7 @@ def load_projects() -> dict[str, dict]:
     """Загрузить проекты из файла"""
     if not PROJECTS_FILE.exists():
         return {}
-    with open(PROJECTS_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+    return orjson.loads(PROJECTS_FILE.read_bytes())
 
 
 def save_projects(projects: dict[str, dict]) -> None:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json
+import orjson
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, TypeVar, cast, overload
@@ -135,7 +135,7 @@ def get_config_val(  # noqa: C901, PLR0912, PLR0911
     if type(default) is list[Path]:
         if value.startswith("[") and value.endswith("]"):
             try:
-                path_list = [Path(s) for s in json.loads(value)]
+                path_list = [Path(s) for s in orjson.loads(value)]
                 if type_hint != _UNSET:
                     return cast("T", path_list)
             except (SyntaxError, ValueError) as e:
@@ -150,7 +150,7 @@ def get_config_val(  # noqa: C901, PLR0912, PLR0911
     if type(default) is list[str]:
         if value.startswith("[") and value.endswith("]"):
             try:
-                str_list = cast("list[str]", json.loads(value))
+                str_list = cast("list[str]", orjson.loads(value))
                 if type_hint != _UNSET:
                     return cast("T", str_list)
             except (SyntaxError, ValueError) as e:

@@ -8,6 +8,7 @@ dependencies = [
     "apscheduler>=3.11.0",
     "firecrawl-py>=4.22.1",
     "openai-agents>=0.0.8",
+    "orjson>=3.10.0",
     "python-dotenv>=1.1.0",
     "redis>=7.4.0",
     "structlog>=25.2.0",

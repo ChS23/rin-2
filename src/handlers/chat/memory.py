@@ -1,7 +1,8 @@
 import asyncio
 import datetime
-import json
 from pathlib import Path
+
+import orjson
 
 import structlog
 from agents import Runner
@@ -32,9 +33,8 @@ def load_memory() -> dict[str, dict]:
     if not MEMORY_FILE.exists():
         return {}
     try:
-        with open(MEMORY_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, IOError):
+        return orjson.loads(MEMORY_FILE.read_bytes())
+    except (orjson.JSONDecodeError, IOError):
         return {}
 
 
@@ -89,7 +89,7 @@ async def _compress_facts(user_name: str, facts: list[str]) -> list[str]:
         async with ai_lock:
             result = await Runner.run(summary_agent, prompt)
         raw = result.final_output.strip()
-        compressed = json.loads(raw)
+        compressed = orjson.loads(raw)
         if isinstance(compressed, list) and compressed:
             return [str(f) for f in compressed]
     except Exception:
@@ -206,7 +206,7 @@ async def init_rin_self_state():
     """Засеять начальное состояние Рин если Valkey пуст"""
     existing = await rdb.get(RIN_SELF_KEY)
     if not existing:
-        await rdb.set(RIN_SELF_KEY, json.dumps(RIN_INITIAL_STATE, ensure_ascii=False))
+        await rdb.set(RIN_SELF_KEY, orjson.dumps(RIN_INITIAL_STATE).decode())
         await logger.ainfo("Начальное состояние Рин инициализировано")
 
 
@@ -216,16 +216,16 @@ async def get_rin_self_state() -> list[str]:
     if not raw:
         return []
     try:
-        data = json.loads(raw)
+        data = orjson.loads(raw)
         return data if isinstance(data, list) else []
-    except (json.JSONDecodeError, TypeError):
+    except (orjson.JSONDecodeError, TypeError):
         return []
 
 
 async def update_rin_self_state(new_state: list[str]):
     """Перезаписать состояние Рин"""
     trimmed = new_state[-RIN_SELF_MAX:]
-    await rdb.set(RIN_SELF_KEY, json.dumps(trimmed, ensure_ascii=False))
+    await rdb.set(RIN_SELF_KEY, orjson.dumps(trimmed).decode())
 
 
 async def refresh_rin_self_state(peer_id: int):
@@ -248,7 +248,7 @@ async def refresh_rin_self_state(peer_id: int):
         async with ai_lock:
             result = await Runner.run(self_state_agent, "\n\n".join(prompt_parts))
         raw = result.final_output.strip()
-        updated = json.loads(raw)
+        updated = orjson.loads(raw)
         if isinstance(updated, list) and updated:
             await update_rin_self_state([str(s) for s in updated])
             await logger.ainfo("Состояние Рин обновлено", count=len(updated))

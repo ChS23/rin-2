@@ -1,6 +1,7 @@
-import json
 import re
 import time
+
+import orjson
 
 import structlog
 from pydantic import BaseModel
@@ -95,7 +96,7 @@ def parse_response(raw) -> RinResponse:
         raw = raw.strip()
 
     try:
-        data = json.loads(raw)
+        data = orjson.loads(raw)
         return RinResponse(
             text=str(data.get("text", raw)),
             reaction=data.get("reaction"),
@@ -103,20 +104,20 @@ def parse_response(raw) -> RinResponse:
             forget=data.get("forget"),
             done=bool(data.get("done", False)),
         )
-    except (json.JSONDecodeError, AttributeError):
+    except (orjson.JSONDecodeError, AttributeError):
         pass
 
     match = re.search(r'\{[^{}]*"text"\s*:.*\}', raw, re.DOTALL)
     if match:
         try:
-            data = json.loads(match.group())
+            data = orjson.loads(match.group())
             return RinResponse(
                 text=str(data.get("text", raw)),
                 reaction=data.get("reaction"),
                 remember=data.get("remember"),
                 forget=data.get("forget"),
             )
-        except (json.JSONDecodeError, AttributeError):
+        except (orjson.JSONDecodeError, AttributeError):
             pass
 
     # Последний шанс — вытащить "text" напрямую регексом даже из невалидного JSON

@@ -3,6 +3,8 @@ import datetime
 import random
 import re
 
+import orjson
+
 import structlog
 from vkbottle import BaseMiddleware
 from vkbottle.bot import Message, BotLabeler
@@ -202,7 +204,11 @@ async def chat_with_rin(message: Message):
     await api.messages.send(
         peer_id=message.peer_id,
         message=r.text,
-        reply_to=message.conversation_message_id,
+        forward=orjson.dumps({
+            "peer_id": message.peer_id,
+            "conversation_message_ids": [message.conversation_message_id],
+            "is_reply": 1,
+        }).decode(),
         random_id=random.getrandbits(31),
     )
     await record_message(message.peer_id, -GROUP_ID, r.text, resolve_user_name)
