@@ -9,6 +9,7 @@ import mido
 import structlog
 from agents import function_tool
 from firecrawl import FirecrawlApp
+from pydantic import BaseModel
 
 from src.bot import rdb
 
@@ -252,8 +253,20 @@ async def create_archive(filenames: list[str], archive_name: str) -> str:
 SOUNDFONT = os.getenv("SOUNDFONT", "/usr/share/sounds/sf2/FluidR3_GM.sf2")
 
 
+class MidiNote(BaseModel):
+    pitch: int = 60   # MIDI нота 0-127
+    vel: int = 64     # громкость 0-127
+    beat: float = 0.0 # начало в долях
+    dur: float = 1.0  # длительность в долях
+
+
+class MidiTrack(BaseModel):
+    program: int = 0        # инструмент 0-127
+    notes: list[MidiNote] = []
+
+
 @function_tool
-async def compose_midi(filename: str, bpm: int, tracks: list[dict]) -> str:
+async def compose_midi(filename: str, bpm: int, tracks: list[MidiTrack]) -> str:
     """Сочинить музыку и прикрепить как .ogg файл.
     filename — имя без расширения, например 'drone_loop1'.
     bpm — темп (для эмбиента 40-70, для мелодии 80-120).
@@ -271,15 +284,15 @@ async def compose_midi(filename: str, bpm: int, tracks: list[dict]) -> str:
         track = mido.MidiTrack()
         mid.tracks.append(track)
         ch = ch_idx % 16
-        prog = max(0, min(127, int(td.get("program", 0))))
+        prog = max(0, min(127, td.program))
         track.append(mido.Message("program_change", channel=ch, program=prog, time=0))
 
         events: list[tuple] = []
-        for n in td.get("notes", []):
-            pitch = max(0, min(127, int(n.get("pitch", 60))))
-            vel   = max(0, min(127, int(n.get("vel", 64))))
-            beat  = float(n.get("beat", 0))
-            dur   = max(0.05, float(n.get("dur", 1)))
+        for n in td.notes:
+            pitch = max(0, min(127, n.pitch))
+            vel   = max(0, min(127, n.vel))
+            beat  = n.beat
+            dur   = max(0.05, n.dur)
             events.append((int(beat * ticks),       "on",  ch, pitch, vel))
             events.append((int((beat + dur) * ticks), "off", ch, pitch))
 
