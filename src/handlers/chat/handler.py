@@ -26,9 +26,7 @@ from src.handlers.chat.memory import (
     update_last_seen, get_days_since,
 )
 from src.handlers.chat.utils import (
-    REPLY_CONTEXT_PROMPT, HARD_REPLY_CAP,
-    get_reply_count, record_reply, mark_done, resolve_user_name,
-    parse_response, get_community_context,
+    resolve_user_name, parse_response, get_community_context,
 )
 
 logger = structlog.get_logger("chat.handler")
@@ -41,14 +39,12 @@ async def _upload_doc(peer_id: int, file_path: str) -> str | None:
     """Загрузить файл как документ VK и вернуть attachment string."""
     try:
         upload_server = await api.docs.get_messages_upload_server(peer_id=peer_id, type="doc")
-        await logger.adebug("Upload server получен", url=upload_server.upload_url)
         async with aiohttp.ClientSession() as session:
             with open(file_path, "rb") as f:
                 data = aiohttp.FormData()
                 data.add_field("file", f, filename=Path(file_path).name, content_type="application/octet-stream")
                 async with session.post(upload_server.upload_url, data=data) as resp:
                     raw = await resp.text()
-                    await logger.adebug("Upload ответ", status=resp.status, body=raw[:300])
                     result = orjson.loads(raw)
         saved = await api.docs.save(file=result["file"], title=Path(file_path).name)
         doc = saved.doc
@@ -169,10 +165,6 @@ class MentionsBot(ABCRule[Message]):
 
 @labeler.chat_message(MentionsBot())
 async def chat_with_rin(message: Message):
-    reply_count = await get_reply_count(message.from_id)
-    if reply_count >= HARD_REPLY_CAP:
-        return
-
     text = message.text or ""
     text = re.sub(r'\[club\d+\|[^\]]*\]', '', text).strip()
     text = re.sub(r'@rinchan_bot', '', text, flags=re.IGNORECASE).strip()
@@ -200,7 +192,6 @@ async def chat_with_rin(message: Message):
             user_ctx += f"\n(Последний раз общались {days_since} дней назад)"
         prompt_parts.append(user_ctx)
     elif days_since is None:
-        # нет ни фактов, ни last_seen — точно первый раз
         prompt_parts.append(f"({user_name} впервые пишет тебе)")
     elif days_since >= 7:
         prompt_parts.append(f"({user_name} не заходил {days_since} дней)")
@@ -210,14 +201,13 @@ async def chat_with_rin(message: Message):
         prompt_parts.append(f"Инфо о сообществе:\n{community}")
     if context:
         prompt_parts.append(context)
-    prompt_parts.append(REPLY_CONTEXT_PROMPT.format(reply_num=reply_count + 1))
     prompt_parts.append(f"{user_name} обращается к тебе: {text}")
 
     prompt = "\n\n".join(prompt_parts)
 
     try:
         async with ai_lock:
-            await rdb.delete(PENDING_FILE_KEY)  # сброс стейла от предыдущего запроса
+            await rdb.delete(PENDING_FILE_KEY)
             result = await asyncio.wait_for(Runner.run(chat_agent, prompt), timeout=120)
     except asyncio.TimeoutError:
         await logger.aerror("Таймаут AI в чате")
@@ -229,8 +219,12 @@ async def chat_with_rin(message: Message):
     file_path = await rdb.getdel(PENDING_FILE_KEY)
     attachment = await _upload_doc(message.peer_id, file_path) if file_path else None
 
-    await record_reply(message.from_id)
     r = parse_response(result.final_output)
+
+    if not r.text:
+        await update_last_seen(message.from_id)
+        await logger.ainfo("Рин промолчала", user_id=message.from_id, user_name=user_name, input=text)
+        return
 
     await api.messages.send(
         peer_id=message.peer_id,
@@ -261,9 +255,6 @@ async def chat_with_rin(message: Message):
         await remember_facts(message.from_id, user_name, r.remember)
         await maybe_compress_memory(message.from_id)
 
-    if r.done:
-        await mark_done(message.from_id)
-
     await update_last_seen(message.from_id)
 
     await logger.ainfo("Рин ответила",
@@ -272,8 +263,6 @@ async def chat_with_rin(message: Message):
         input=text,
         reaction=r.reaction,
         remembered=r.remember or None,
-        done=r.done,
-        reply_num=reply_count + 1,
         attachment=attachment,
     )
 

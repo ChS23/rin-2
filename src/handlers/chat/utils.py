@@ -1,19 +1,15 @@
 import re
-import time
 
 import orjson
 
 import structlog
 from pydantic import BaseModel
 
-from src.bot import api, rdb
+from src.bot import api
 
 logger = structlog.get_logger("chat.utils")
 
-HARD_REPLY_CAP = 15
-REPLY_WINDOW = 10 * 60
 MAX_NAME_CACHE = 500
-REPLY_KEY_PREFIX = "rin:replies:{user_id}"
 
 _user_names_cache: dict[int, str] = {}
 
@@ -23,53 +19,6 @@ class RinResponse(BaseModel):
     reaction: str | None = None
     remember: list[str] | None = None
     forget: list[str] | None = None
-    done: bool = False
-
-
-HARD_REPLY_CAP = 15
-REPLY_WINDOW = 10 * 60
-
-REPLY_CONTEXT_PROMPT = """
-Это твой {reply_num}-й ответ этому человеку за последние 10 минут.
-
-Ты сама решаешь, хочешь ли продолжать разговор. Поставь "done": true если хочешь уйти, false если хочешь продолжить.
-
-ОСТАВАЙСЯ (done: false) если:
-- Человек задаёт технический вопрос (Ren'Py, код, арт, движки) и ты реально помогаешь
-- Обсуждается конкретный проект и ты можешь быть полезна
-- Разговор интересный и содержательный
-
-УХОДИ (done: true) если:
-- Просто болтовня ни о чём, и ты уже ответила 3+ раз
-- Человек троллит, флиртует или несёт ерунду
-- Разговор зацикливается, повторяется одно и то же
-- Ты уже помогла и вопрос решён
-- Тебе просто "надоело" — это нормально, ты живой человек
-
-Когда уходишь — попрощайся естественно, не объясняй почему. Не упоминай лимиты или что ты "бот".
-""".strip()
-
-
-async def get_reply_count(user_id: int) -> int:
-    """Сколько ответов этому пользователю за последнее окно"""
-    key = REPLY_KEY_PREFIX.format(user_id=user_id)
-    count = await rdb.llen(key)
-    return count
-
-
-async def record_reply(user_id: int):
-    key = REPLY_KEY_PREFIX.format(user_id=user_id)
-    await rdb.rpush(key, str(time.time()))
-    await rdb.expire(key, REPLY_WINDOW)
-
-
-async def mark_done(user_id: int):
-    """Пометить что Рин ушла от этого пользователя"""
-    key = REPLY_KEY_PREFIX.format(user_id=user_id)
-    await rdb.delete(key)
-    for _ in range(HARD_REPLY_CAP):
-        await rdb.rpush(key, str(time.time()))
-    await rdb.expire(key, REPLY_WINDOW)
 
 
 async def resolve_user_name(user_id: int) -> str:
@@ -102,7 +51,6 @@ def parse_response(raw) -> RinResponse:
             reaction=data.get("reaction"),
             remember=data.get("remember"),
             forget=data.get("forget"),
-            done=bool(data.get("done", False)),
         )
     except (orjson.JSONDecodeError, AttributeError):
         pass
@@ -120,16 +68,13 @@ def parse_response(raw) -> RinResponse:
         except (orjson.JSONDecodeError, AttributeError):
             pass
 
-    # Последний шанс — вытащить "text" напрямую регексом даже из невалидного JSON
     text_match = re.search(r'"text"\s*:\s*"((?:[^"\\]|\\.)*)"', raw)
     if text_match:
         text = text_match.group(1).replace('\\"', '"').replace('\\n', '\n').replace('\\\\', '\\')
         reaction_match = re.search(r'"reaction"\s*:\s*"([^"]+)"', raw)
-        done_match = re.search(r'"done"\s*:\s*(true|false)', raw)
         return RinResponse(
             text=text,
             reaction=reaction_match.group(1) if reaction_match else None,
-            done=done_match.group(1) == "true" if done_match else False,
         )
 
     clean = re.sub(r'\{[^{}]*"text"\s*:.*\}\s*$', '', raw, flags=re.DOTALL).strip()
