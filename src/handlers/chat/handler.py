@@ -140,11 +140,6 @@ class MentionsBot(ABCRule[Message]):
 
 @labeler.chat_message(MentionsBot())
 async def chat_with_rin(message: Message):
-    # Дедупликация хендлера
-    cmid = message.conversation_message_id
-    if cmid in _seen_messages:
-        return
-
     reply_count = await get_reply_count(message.from_id)
     if reply_count >= HARD_REPLY_CAP:
         return
