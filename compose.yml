@@ -28,11 +28,17 @@ services:
     volumes:
       - bot_data:/data:ro
       - ./nginx-web.conf:/etc/nginx/conf.d/default.conf:ro
-    ports:
-      - "127.0.0.1:3721:80"
+    networks:
+      - default
+      - gateway
     depends_on:
       - bot
     restart: unless-stopped
+
+networks:
+  gateway:
+    external: true
+    name: gateway-net
 
 volumes:
   bot_data:
