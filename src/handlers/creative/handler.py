@@ -31,7 +31,7 @@ class CreativeLoggingHooks(RunHooks):
 
 
 _hooks = CreativeLoggingHooks()
-_run_config = RunConfig(tracing_disabled=True, max_turns=25)
+_run_config = RunConfig(tracing_disabled=True, max_turns=50)
 
 LAST_MSG_KEY = "rin:chat:{peer_id}:last_msg_ts"
 CREATIVE_COOLDOWN_KEY = "rin:creative:last_run"
@@ -93,7 +93,7 @@ async def run_creative_session():
     try:
         async with ai_lock:
             result = await asyncio.wait_for(
-                Runner.run(creative_agent, prompt, run_config=_run_config, hooks=_hooks), timeout=600
+                Runner.run(creative_agent, prompt, run_config=_run_config, hooks=_hooks), timeout=900
             )
 
         await rdb.set(
@@ -150,7 +150,7 @@ async def run_forced_session():
     try:
         async with ai_lock:
             result = await asyncio.wait_for(
-                Runner.run(creative_agent, prompt, run_config=_run_config, hooks=_hooks), timeout=600
+                Runner.run(creative_agent, prompt, run_config=_run_config, hooks=_hooks), timeout=900
             )
         output = result.final_output or ""
         if output:
