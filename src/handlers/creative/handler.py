@@ -267,8 +267,10 @@ async def dm_web(message: Message):
     if message.from_id != ADMIN_ID:
         return
     await message.answer("Собираю веб-билд...")
+    await logger.ainfo("DM: web build запрошен", user=message.from_id)
     from src.handlers.creative.tools import _renpy_web_build_impl
     result = await _renpy_web_build_impl()
+    await logger.ainfo("DM: web build результат", result=result[:200])
     await message.answer(result[:4000], keyboard=_admin_keyboard())
 
 
