@@ -175,6 +175,41 @@ async def download_file(url: str, filename: str) -> str:
 
 
 @function_tool
+async def edit_file(filename: str, old_string: str, new_string: str) -> str:
+    """Заменить фрагмент в существующем файле.
+    filename — путь относительно папки скриптов.
+    old_string — точный текст для замены (должен встречаться ровно один раз).
+    new_string — на что заменить."""
+    try:
+        file_path = _safe_path(filename)
+    except ValueError:
+        return "Недопустимый путь файла"
+    if not file_path.exists():
+        return f"Файл {filename} не найден"
+    try:
+        async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
+            content = await f.read()
+        count = content.count(old_string)
+        if count == 0:
+            return "Фрагмент не найден в файле"
+        if count > 1:
+            return f"Фрагмент встречается {count} раз — уточни контекст чтобы было однозначно"
+        new_content = content.replace(old_string, new_string, 1)
+        async with aiofiles.open(file_path, "w", encoding="utf-8") as f:
+            await f.write(new_content)
+        # показываем контекст вокруг изменения
+        lines = new_content.splitlines()
+        insert_line = new_content[: new_content.index(new_string)].count("\n")
+        start = max(0, insert_line - 2)
+        end = min(len(lines), insert_line + new_string.count("\n") + 3)
+        snippet = "\n".join(f"{start + i + 1}: {l}" for i, l in enumerate(lines[start:end]))
+        await logger.ainfo("Файл отредактирован", filename=filename)
+        return f"Готово:\n{snippet}"
+    except Exception as e:
+        return f"Ошибка: {e}"
+
+
+@function_tool
 async def create_archive(filenames: list[str], archive_name: str) -> str:
     """Упаковать несколько файлов в zip-архив и прикрепить к ответу.
     filenames — список путей относительно папки скриптов (используй list_scripts чтобы узнать что есть).
@@ -212,4 +247,4 @@ async def create_archive(filenames: list[str], archive_name: str) -> str:
     return result
 
 
-all_tools = [web_search, read_url, write_script, read_script, list_scripts, download_file, create_archive]
+all_tools = [web_search, read_url, write_script, edit_file, read_script, list_scripts, download_file, create_archive]
