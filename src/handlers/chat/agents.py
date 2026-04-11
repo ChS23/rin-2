@@ -1,7 +1,7 @@
 from agents import Agent
 
 from src.handlers.checkin import ai_model, REACTIONS
-from src.handlers.chat.tools import all_tools
+from src.handlers.chat.tools import all_tools, music_tools
 
 REACTION_NAMES = ", ".join(f'"{k}"' for k in REACTIONS)
 
@@ -78,10 +78,37 @@ RIN_LORE = """
     - Внутренние шутки: если помнишь смешной момент из чата — можешь отослать. Не выдумывай.
 """
 
+music_agent = Agent(
+    model=ai_model,
+    name="Рин (музыка)",
+    tools=music_tools,
+    instructions="""
+    Ты — музыкальный модуль Рин. Получаешь текстовое описание нужного звука/музыки и создаёшь .ogg файл через compose_midi.
+
+    ТЕОРИЯ:
+    - MIDI ноты: C2=36, G2=43, C3=48, G3=55, C4=60, G4=67, A4=69, C5=72
+    - Квинта (pitch + 7) — холодно, пусто, арктика
+    - Минорная терция (pitch + 3) — грусть, тревога
+    - program 88 = synth pad (NewAge), 92 = atmosphere, 48 = strings, 51 = choir, 0 = piano
+
+    ДЛЯ АТМОСФЕРЫ VN:
+    - Эмбиент/дрон: bpm 40-60, notes с dur 4-8, vel 10-30, program 88/92, квинты
+    - Тревожно: добавь секунду (pitch+1 или pitch+2), vel чуть выше
+    - Меланхолия: bpm 50-65, program 48 (strings), минорные трезвучия
+
+    Верни только результат compose_midi — текст не нужен, инструмент сам прикрепит файл.
+    """,
+)
+
+_music_tool = music_agent.as_tool(
+    tool_name="compose_music",
+    tool_description="Сочинить и прикрепить музыкальный файл (.ogg). Передай описание нужного звука: настроение, сцена, атмосфера. Агент сам подберёт ноты и инструменты.",
+)
+
 chat_agent = Agent(
     model=ai_model,
     name="Рин",
-    tools=all_tools,
+    tools=all_tools + [_music_tool],
     instructions=f"""
     {RIN_LORE}
 
@@ -113,6 +140,7 @@ chat_agent = Agent(
     - edit_file: заменить конкретный фрагмент в уже написанном файле — когда надо поправить одну строку, а не переписывать всё. old_string должен встречаться ровно один раз.
     - read_script: прочитать файл который ты уже писала раньше — чтобы продолжить с нужного места или сверить логику.
     - list_scripts: посмотреть что ты уже написала (список файлов).
+    - compose_music: сочинить музыку и прикрепить как .ogg — просто опиши настроение/сцену ("грустный арктический дрон", "тревожный эмбиент для второго лупа"). Отдельный агент сам подберёт ноты.
     - create_archive: упаковать несколько своих файлов в zip и прикрепить. Сначала list_scripts — потом сама решаешь что включить. Используй когда просят прислать всё или несколько файлов сразу.
     - download_file: скачать файл по прямой ссылке и прикрепить к ответу. Поддерживает аудио (.ogg/.mp3/.wav/.flac), картинки (.png/.jpg/.gif/.webp), документы (.pdf/.txt), архивы (.zip). Используй когда просят найти и прислать файл — сначала web_search чтобы найти прямую ссылку, потом download_file. Хорошие источники: OpenGameArt.org (прямые CDN-ссылки), GitHub releases, archive.org. Freesound.org требует авторизацию — там прямые ссылки не работают, ищи альтернативы.
 

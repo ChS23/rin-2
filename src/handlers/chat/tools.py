@@ -1,9 +1,11 @@
+import asyncio
 import os
 import zipfile
 from pathlib import Path
 
 import aiofiles
 import aiohttp
+import mido
 import structlog
 from agents import function_tool
 from firecrawl import FirecrawlApp
@@ -247,4 +249,72 @@ async def create_archive(filenames: list[str], archive_name: str) -> str:
     return result
 
 
+SOUNDFONT = os.getenv("SOUNDFONT", "/usr/share/sounds/sf2/FluidR3_GM.sf2")
+
+
+@function_tool
+async def compose_midi(filename: str, bpm: int, tracks: list[dict]) -> str:
+    """Сочинить музыку и прикрепить как .ogg файл.
+    filename — имя без расширения, например 'drone_loop1'.
+    bpm — темп (для эмбиента 40-70, для мелодии 80-120).
+    tracks — список инструментов: [{"program": 48, "notes": [{"pitch": 48, "vel": 25, "beat": 0.0, "dur": 4.0}]}]
+    Полезные program: 0=фортепиано, 40=скрипка, 48=струнные, 51=хор, 88=синт-пад, 92=атмосфера.
+    pitch — нота MIDI (36=C2, 48=C3, 60=C4, 67=G4). vel — громкость 0-127. beat — начало в долях. dur — длительность в долях."""
+    ticks = 480
+    tempo = mido.bpm2tempo(max(10, min(300, bpm)))
+    mid = mido.MidiFile(ticks_per_beat=ticks)
+    meta = mido.MidiTrack()
+    mid.tracks.append(meta)
+    meta.append(mido.MetaMessage("set_tempo", tempo=tempo, time=0))
+
+    for ch_idx, td in enumerate(tracks[:15]):
+        track = mido.MidiTrack()
+        mid.tracks.append(track)
+        ch = ch_idx % 16
+        prog = max(0, min(127, int(td.get("program", 0))))
+        track.append(mido.Message("program_change", channel=ch, program=prog, time=0))
+
+        events: list[tuple] = []
+        for n in td.get("notes", []):
+            pitch = max(0, min(127, int(n.get("pitch", 60))))
+            vel   = max(0, min(127, int(n.get("vel", 64))))
+            beat  = float(n.get("beat", 0))
+            dur   = max(0.05, float(n.get("dur", 1)))
+            events.append((int(beat * ticks),       "on",  ch, pitch, vel))
+            events.append((int((beat + dur) * ticks), "off", ch, pitch))
+
+        events.sort(key=lambda e: e[0])
+        prev = 0
+        for ev in events:
+            delta, prev = ev[0] - prev, ev[0]
+            if ev[1] == "on":
+                track.append(mido.Message("note_on",  channel=ev[2], note=ev[3], velocity=ev[4], time=delta))
+            else:
+                track.append(mido.Message("note_off", channel=ev[2], note=ev[3], velocity=0,    time=delta))
+
+    safe = filename.replace("/", "_").strip() or "music"
+    mid_path = SCRIPTS_DIR / f"{safe}.mid"
+    ogg_path = SCRIPTS_DIR / f"{safe}.ogg"
+    mid_path.parent.mkdir(parents=True, exist_ok=True)
+    mid.save(str(mid_path))
+
+    proc = await asyncio.create_subprocess_exec(
+        "fluidsynth", "-ni", SOUNDFONT, str(mid_path),
+        "-F", str(ogg_path), "-r", "44100",
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+    mid_path.unlink(missing_ok=True)
+
+    if not ogg_path.exists():
+        return f"Ошибка рендера FluidSynth: {stderr.decode()[:300]}"
+
+    size_kb = ogg_path.stat().st_size // 1024
+    await rdb.set(PENDING_FILE_KEY, str(ogg_path), ex=300)
+    await logger.ainfo("Музыка создана", filename=f"{safe}.ogg", size_kb=size_kb, bpm=bpm)
+    return f"Файл {safe}.ogg готов ({size_kb} KB)"
+
+
 all_tools = [web_search, read_url, write_script, edit_file, read_script, list_scripts, download_file, create_archive]
+music_tools = [compose_midi]
