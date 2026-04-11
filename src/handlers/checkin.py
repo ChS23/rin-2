@@ -2,8 +2,9 @@ import asyncio
 import datetime
 import os
 import random
-from dataclasses import dataclass, field
 import structlog
+
+import redis.asyncio as aioredis
 
 from agents import Agent, Runner
 from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
@@ -28,6 +29,7 @@ import agents
 agents.set_tracing_disabled(True)
 
 ai_lock = asyncio.Lock()
+rdb = aioredis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379"), decode_responses=True)
 logger = structlog.get_logger("handlers.checkin")
 CHAT_PEER_ID = 2000000001  # chat_id=1 -> peer_id=2000000001
 
@@ -51,34 +53,36 @@ REACTIONS = {
 }
 
 
-@dataclass
-class CheckinState:
-    """Класс для управления состоянием чекинов"""
-    daily_message_id: int = 0
-    daily_members: dict[int, str] = field(default_factory=dict)
-    _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-
-    async def add_member_response(self, user_id: int, text: str) -> None:
-        async with self._lock:
-            self.daily_members[user_id] = text
-
-    async def snapshot_and_clear(self) -> dict[int, str]:
-        """Атомарно забрать ответы и очистить"""
-        async with self._lock:
-            members = dict(self.daily_members)
-            self.daily_members = {}
-            return members
+CHECKIN_MSG_KEY = "rin:checkin:daily_message_id"
+CHECKIN_MEMBERS_KEY = "rin:checkin:daily_members"
 
 
-state = CheckinState()
+async def get_daily_message_id() -> int:
+    val = await rdb.get(CHECKIN_MSG_KEY)
+    return int(val) if val else 0
+
+
+async def set_daily_message_id(msg_id: int):
+    await rdb.set(CHECKIN_MSG_KEY, msg_id)
+
+
+async def add_member_response(user_id: int, text: str):
+    await rdb.hset(CHECKIN_MEMBERS_KEY, str(user_id), text)
+
+
+async def snapshot_and_clear_members() -> dict[int, str]:
+    """Атомарно забрать ответы и очистить"""
+    members_raw = await rdb.hgetall(CHECKIN_MEMBERS_KEY)
+    await rdb.delete(CHECKIN_MEMBERS_KEY)
+    return {int(uid): text for uid, text in members_raw.items()}
 
 
 class ReplyToDailyMessage(ABCRule[Message]):
     async def check(self, event: Message) -> bool:
-        return (
-            event.reply_message is not None
-            and event.reply_message.conversation_message_id == state.daily_message_id
-        )
+        if not event.reply_message:
+            return False
+        daily_id = await get_daily_message_id()
+        return daily_id > 0 and event.reply_message.conversation_message_id == daily_id
 
 
 scheduler = AsyncIOScheduler(timezone='Europe/Moscow')
@@ -168,7 +172,7 @@ CHECKIN_REACTION = REACTIONS["fire"]
 
 @labeler.message(ReplyToDailyMessage())
 async def reply_to_daily_message(message: Message):
-    await state.add_member_response(message.from_id, message.text)
+    await add_member_response(message.from_id, message.text)
     try:
         await api.request("messages.sendReaction", {
             "peer_id": message.peer_id,
@@ -182,8 +186,8 @@ async def reply_to_daily_message(message: Message):
 
 @scheduler.scheduled_job(trigger=CronTrigger(hour=16, minute=10))
 async def end_of_day_checkin():
-    # Атомарно забираем ответы
-    members = await state.snapshot_and_clear()
+    # Атомарно забираем ответы из Valkey
+    members = await snapshot_and_clear_members()
 
     users_info = []
     if members:
@@ -231,8 +235,9 @@ async def midday_checkin():
             message=result.final_output,
             random_id=random.getrandbits(31),
         )
-        state.daily_message_id = response[0].conversation_message_id
-        await logger.ainfo("Утренний чекин отправлен", message_id=state.daily_message_id)
+        msg_id = response[0].conversation_message_id
+        await set_daily_message_id(msg_id)
+        await logger.ainfo("Утренний чекин отправлен", message_id=msg_id)
     except Exception as e:
         await logger.aerror("Ошибка утреннего чекина", error=str(e))
 
