@@ -216,25 +216,31 @@ def _admin_keyboard():
 async def dm_roadmap(message: Message):
     if message.from_id != ADMIN_ID:
         return
-    from src.handlers.creative.tools import read_roadmap
-    await message.answer(read_roadmap()[:4000], keyboard=_admin_keyboard())
+    from src.handlers.creative.tools import _read_roadmap_impl
+    await message.answer(_read_roadmap_impl()[:4000], keyboard=_admin_keyboard())
 
 
 @labeler.private_message(text="Файлы")
 async def dm_files(message: Message):
     if message.from_id != ADMIN_ID:
         return
-    from src.handlers.creative.tools import list_scripts
-    await message.answer(list_scripts()[:4000], keyboard=_admin_keyboard())
+    from src.handlers.creative.tools import SCRIPTS_DIR
+    files = sorted(SCRIPTS_DIR.rglob("*"))
+    files = [f for f in files if f.is_file()]
+    if not files:
+        await message.answer("Файлов нет", keyboard=_admin_keyboard())
+        return
+    lines = [f"{f.relative_to(SCRIPTS_DIR)} ({f.stat().st_size} б)" for f in files]
+    await message.answer("\n".join(lines)[:4000], keyboard=_admin_keyboard())
 
 
 @labeler.private_message(text="Lint")
 async def dm_lint(message: Message):
     if message.from_id != ADMIN_ID:
         return
-    from src.handlers.creative.tools import renpy_lint
+    from src.handlers.creative.tools import _renpy_lint_impl
     await message.answer("Запускаю lint...")
-    result = await renpy_lint()
+    result = await _renpy_lint_impl()
     await message.answer(result[:4000], keyboard=_admin_keyboard())
 
 
@@ -261,8 +267,8 @@ async def dm_web(message: Message):
     if message.from_id != ADMIN_ID:
         return
     await message.answer("Собираю веб-билд...")
-    from src.handlers.creative.tools import renpy_web_build
-    result = await renpy_web_build()
+    from src.handlers.creative.tools import _renpy_web_build_impl
+    result = await _renpy_web_build_impl()
     await message.answer(result[:4000], keyboard=_admin_keyboard())
 
 
