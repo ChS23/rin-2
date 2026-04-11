@@ -45,7 +45,11 @@ async def _upload_doc(peer_id: int, file_path: str) -> str | None:
                 data.add_field("file", f, filename=Path(file_path).name, content_type="application/octet-stream")
                 async with session.post(upload_server.upload_url, data=data) as resp:
                     raw = await resp.text()
-                    result = orjson.loads(raw)
+                    try:
+                        result = orjson.loads(raw)
+                    except (orjson.JSONDecodeError, ValueError):
+                        await logger.awarn("VK upload: ответ не JSON", response=raw[:300], path=file_path)
+                        return None
         if "file" not in result:
             await logger.awarn("VK upload: нет поля file", response=raw[:300], path=file_path)
             return None

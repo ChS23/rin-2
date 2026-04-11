@@ -129,6 +129,25 @@ def list_scripts() -> str:
     return "\n".join(lines)
 
 
+@function_tool
+async def send_file(filename: str) -> str:
+    """Прикрепить уже существующий файл к ответу (не создавая новый).
+    filename — путь относительно папки скриптов, например 'arctic_drone.ogg'."""
+    try:
+        file_path = _safe_path(filename)
+    except ValueError:
+        return "Недопустимый путь файла"
+    if not file_path.exists():
+        return f"Файл {filename} не найден"
+    size_kb = file_path.stat().st_size // 1024
+    if size_kb > MAX_DOWNLOAD_BYTES // 1024:
+        return f"Файл слишком большой ({size_kb} KB)"
+    await rdb.set(PENDING_FILE_KEY, str(file_path), ex=300)
+    rel = file_path.relative_to(SCRIPTS_DIR)
+    await logger.ainfo("Файл прикреплён", filename=str(rel), size_kb=size_kb)
+    return f"Файл {rel} будет прикреплён ({size_kb} KB)"
+
+
 ALLOWED_EXTS = {
     ".ogg", ".mp3", ".wav", ".flac",           # аудио
     ".png", ".jpg", ".jpeg", ".gif", ".webp",  # картинки
@@ -335,5 +354,5 @@ async def compose_midi(filename: str, bpm: int, tracks: list[MidiTrack], max_sec
     return f"Файл {safe}.ogg готов ({size_kb} KB)"
 
 
-all_tools = [web_search, read_url, write_script, edit_file, read_script, list_scripts, download_file, create_archive]
+all_tools = [web_search, read_url, write_script, edit_file, read_script, list_scripts, send_file, download_file, create_archive]
 music_tools = [compose_midi]
