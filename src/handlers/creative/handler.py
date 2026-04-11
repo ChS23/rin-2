@@ -242,9 +242,18 @@ async def dm_lint(message: Message):
 async def dm_run(message: Message):
     if message.from_id != ADMIN_ID:
         return
-    await message.answer("Запускаю creative сессию...", keyboard=_admin_keyboard())
+    await message.answer("Запускаю creative сессию (по роадмапу)...", keyboard=_admin_keyboard())
     await run_forced_session()
     await message.answer("Сессия завершена.", keyboard=_admin_keyboard())
+
+
+@labeler.private_message(text="Задача <task>")
+async def dm_run_task(message: Message, task: str):
+    if message.from_id != ADMIN_ID:
+        return
+    await message.answer(f"Запускаю: {task[:100]}", keyboard=_admin_keyboard())
+    await run_forced_session(task)
+    await message.answer("Готово.", keyboard=_admin_keyboard())
 
 
 @labeler.private_message(text="Web билд")
@@ -280,13 +289,11 @@ async def dm_status(message: Message):
 
 
 @labeler.private_message()
-async def dm_free_input(message: Message):
-    """Свободный ввод — запускает creative сессию с задачей."""
+async def dm_default(message: Message):
+    """Показать клавиатуру для незнакомых сообщений."""
     if message.from_id != ADMIN_ID:
         return
-    text = (message.text or "").strip()
-    if not text:
-        return
-    await message.answer(f"Запускаю задачу: {text[:100]}", keyboard=_admin_keyboard())
-    await run_forced_session(text)
-    await message.answer("Готово.", keyboard=_admin_keyboard())
+    await message.answer(
+        'Используй кнопки или напиши "Задача <описание>" для кастомной задачи.',
+        keyboard=_admin_keyboard(),
+    )
