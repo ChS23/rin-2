@@ -352,9 +352,10 @@ async def compose_midi(filename: str, bpm: int, tracks: list[MidiTrack], max_sec
     if not wav_path.exists():
         return f"Ошибка рендера FluidSynth: {stderr.decode()[:300]}"
 
-    # WAV → OGG через oggenc
+    # WAV → OGG Opus через opusenc (VK audio_message требует Opus)
     proc2 = await asyncio.create_subprocess_exec(
-        "oggenc", str(wav_path), "-o", str(ogg_path), "-q", "3",
+        "opusenc", str(wav_path), str(ogg_path),
+        "--bitrate", "64",
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -362,7 +363,7 @@ async def compose_midi(filename: str, bpm: int, tracks: list[MidiTrack], max_sec
     wav_path.unlink(missing_ok=True)
 
     if not ogg_path.exists():
-        return "Ошибка конвертации WAV → OGG"
+        return "Ошибка конвертации WAV → Opus"
 
     size_kb = ogg_path.stat().st_size // 1024
     await rdb.set(PENDING_FILE_KEY, str(ogg_path), ex=300)

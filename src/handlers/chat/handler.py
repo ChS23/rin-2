@@ -41,7 +41,6 @@ AUDIO_EXTS = {".ogg", ".mp3", ".wav", ".flac", ".opus"}
 async def _upload_doc(peer_id: int, file_path: str) -> str | None:
     """Загрузить файл как документ VK и вернуть attachment string."""
     try:
-        # Аудиофайлы VK блокирует как doc — загружаем как audio_message
         ext = Path(file_path).suffix.lower()
         doc_type = "audio_message" if ext in AUDIO_EXTS else "doc"
         upload_server = await api.docs.get_messages_upload_server(peer_id=peer_id, type=doc_type)

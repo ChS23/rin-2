@@ -5,7 +5,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 RUN apt-get update && apt-get install -y --no-install-recommends \
     fluidsynth \
     fluid-soundfont-gm \
-    vorbis-tools \
+    opus-tools \
     && rm -rf /var/lib/apt/lists/*
 
 COPY . /app
