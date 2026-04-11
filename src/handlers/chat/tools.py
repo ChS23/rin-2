@@ -382,11 +382,12 @@ RIN_APPEARANCE = (
 
 
 @function_tool
-async def generate_image(description: str, style: str = "digital art", selfie: bool = False) -> str:
+async def generate_image(description: str, style: str = "digital art", selfie: bool = False, filename: str = "") -> str:
     """Сгенерировать картинку по описанию и прикрепить к ответу.
     description — описание на любом языке, например 'арктическая метеостанция ночью' или 'кот в скафандре'.
     style — стиль: 'digital art', 'anime', 'watercolor', 'photo', 'pixel art', 'oil painting' (по умолчанию digital art).
     selfie — если True, на картинке будешь ты (Рин). Используй когда просят фото/селфи/как ты выглядишь.
+    filename — путь для сохранения, например 'chastota/game/images/bg_station_night.png'. Если пусто — автоимя.
     Промпт будет автоматически улучшен для лучшего результата."""
     # Если селфи — подмешиваем фиксированную внешность Рин
     if selfie:
@@ -399,8 +400,16 @@ async def generate_image(description: str, style: str = "digital art", selfie: b
     params = "width=1024&height=1024&nologo=true&enhance=true&safe=true"
     full_url = f"{url}?{params}"
 
-    safe_name = re.sub(r'[^\w\s-]', '', description[:40]).strip().replace(' ', '_') or "image"
-    file_path = SCRIPTS_DIR / f"{safe_name}.png"
+    if filename:
+        try:
+            file_path = _safe_path(filename)
+        except ValueError:
+            return "Недопустимый путь файла"
+        if not file_path.suffix:
+            file_path = file_path.with_suffix(".png")
+    else:
+        safe_name = re.sub(r'[^\w\s-]', '', description[:40]).strip().replace(' ', '_') or "image"
+        file_path = SCRIPTS_DIR / f"{safe_name}.png"
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -416,9 +425,10 @@ async def generate_image(description: str, style: str = "digital art", selfie: b
             await f.write(data)
 
         size_kb = len(data) // 1024
+        rel = file_path.relative_to(SCRIPTS_DIR)
         await rdb.set(PENDING_FILE_KEY, str(file_path), ex=300)
-        await logger.ainfo("Картинка сгенерирована", filename=safe_name, size_kb=size_kb, style=style)
-        return f"Картинка {safe_name}.png готова ({size_kb} KB)"
+        await logger.ainfo("Картинка сгенерирована", filename=str(rel), size_kb=size_kb, style=style)
+        return f"Картинка {rel} готова ({size_kb} KB)"
     except asyncio.TimeoutError:
         return "Таймаут генерации картинки (>60с)"
     except Exception as e:

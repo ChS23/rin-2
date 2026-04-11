@@ -60,7 +60,10 @@ async def _upload_doc(peer_id: int, file_path: str) -> str | None:
             await logger.awarn("VK upload: нет поля file", response=raw[:300], path=file_path)
             return None
         saved = await api.docs.save(file=result["file"], title=Path(file_path).name)
-        doc = saved.doc
+        doc = saved.doc or saved.audio_message
+        if not doc:
+            await logger.awarn("VK upload: пустой ответ docs.save", path=file_path)
+            return None
         await logger.ainfo("Файл загружен в VK", doc=f"doc{doc.owner_id}_{doc.id}")
         return f"doc{doc.owner_id}_{doc.id}"
     except Exception as e:
