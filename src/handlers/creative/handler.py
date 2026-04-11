@@ -5,6 +5,8 @@ import random
 import structlog
 from agents import Runner, RunConfig, RunHooks, Agent, Tool
 
+from vkbottle.bot import Message, BotLabeler
+
 from src.bot import api, rdb
 from src.handlers.checkin import ai_lock, scheduler, CHAT_PEER_ID
 from src.handlers.creative.agent import creative_agent
@@ -14,6 +16,9 @@ from src.handlers.chat.memory import (
 from src.handlers.chat.utils import resolve_user_name, parse_response
 
 logger = structlog.get_logger("creative.handler")
+labeler = BotLabeler()
+
+ADMIN_ID = 326129427
 
 
 class CreativeLoggingHooks(RunHooks):
@@ -186,3 +191,62 @@ async def creative_session_night_1():
 @scheduler.scheduled_job(trigger="cron", hour=3, minute=0)
 async def creative_session_night_2():
     await run_creative_session()
+
+
+# ═══════════════════════════════════════════════════════════
+#              ЛС КОМАНДЫ ДЛЯ ТЕСТИРОВАНИЯ (admin only)
+# ═══════════════════════════════════════════════════════════
+
+@labeler.private_message(text="/creative run")
+async def dm_creative_run(message: Message):
+    if message.from_id != ADMIN_ID:
+        return
+    await message.answer("Запускаю creative сессию...")
+    await run_forced_session()
+    await message.answer("Сессия завершена.")
+
+
+@labeler.private_message(text="/creative run <task>")
+async def dm_creative_run_task(message: Message, task: str):
+    if message.from_id != ADMIN_ID:
+        return
+    await message.answer(f"Запускаю: {task}")
+    await run_forced_session(task)
+    await message.answer("Сессия завершена.")
+
+
+@labeler.private_message(text="/creative web")
+async def dm_creative_web(message: Message):
+    if message.from_id != ADMIN_ID:
+        return
+    await message.answer("Собираю веб-билд...")
+    from src.handlers.creative.tools import renpy_web_build
+    result = await renpy_web_build()
+    await message.answer(result)
+
+
+@labeler.private_message(text="/creative lint")
+async def dm_creative_lint(message: Message):
+    if message.from_id != ADMIN_ID:
+        return
+    from src.handlers.creative.tools import renpy_lint
+    result = await renpy_lint()
+    await message.answer(result[:4000])
+
+
+@labeler.private_message(text="/creative roadmap")
+async def dm_creative_roadmap(message: Message):
+    if message.from_id != ADMIN_ID:
+        return
+    from src.handlers.creative.tools import read_roadmap
+    result = read_roadmap()
+    await message.answer(result[:4000])
+
+
+@labeler.private_message(text="/creative files")
+async def dm_creative_files(message: Message):
+    if message.from_id != ADMIN_ID:
+        return
+    from src.handlers.creative.tools import list_scripts
+    result = list_scripts()
+    await message.answer(result[:4000])
