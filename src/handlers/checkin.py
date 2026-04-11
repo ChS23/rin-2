@@ -214,7 +214,7 @@ async def end_of_day_checkin():
         await api.messages.send(
             peer_ids=[CHAT_PEER_ID],
             message=result.final_output,
-            random_id=random.getrandbits(64),
+            random_id=random.getrandbits(31),
         )
     except Exception as e:
         await logger.aerror("Ошибка вечернего чекина", error=str(e))
@@ -229,7 +229,7 @@ async def midday_checkin():
         response = await api.messages.send(
             peer_ids=[CHAT_PEER_ID],
             message=result.final_output,
-            random_id=random.getrandbits(64),
+            random_id=random.getrandbits(31),
         )
         state.daily_message_id = response[0].conversation_message_id
         await logger.ainfo("Утренний чекин отправлен", message_id=state.daily_message_id)

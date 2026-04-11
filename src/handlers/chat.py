@@ -675,7 +675,7 @@ async def rin_initiative():
         await api.messages.send(
             peer_ids=[CHAT_PEER_ID],
             message=text,
-            random_id=random.getrandbits(64),
+            random_id=random.getrandbits(31),
         )
         await record_message(CHAT_PEER_ID, -GROUP_ID, text)
         await logger.ainfo("Рин написала сама", text=text)
