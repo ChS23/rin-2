@@ -6,6 +6,7 @@ import structlog
 from vkbottle.bot import Message, BotLabeler
 
 from src.bot import api
+from src.utils import safe_json_write
 
 logger = structlog.get_logger("handlers.roles")
 labeler = BotLabeler()
@@ -24,9 +25,7 @@ def load_roles() -> dict[str, list[int]]:
 
 def save_roles(roles: dict[str, list[int]]) -> None:
     """Сохранить роли в файл"""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with open(ROLES_FILE, "w", encoding="utf-8") as f:
-        json.dump(roles, f, ensure_ascii=False, indent=2)
+    safe_json_write(ROLES_FILE, roles)
 
 
 # Паттерн для проверки валидного названия роли (только буквы, цифры, пробелы, дефисы)
@@ -38,7 +37,7 @@ def normalize_role(role: str) -> str | None:
     role = role.lower().strip()
 
     # Проверяем на запрещённые символы (теги, ссылки и т.д.)
-    if '@' in role or '[' in role or ']' in role or 'id' in role and any(c.isdigit() for c in role):
+    if '@' in role or '[' in role or ']' in role or ('id' in role and any(c.isdigit() for c in role)):
         return None
 
     # Проверяем что роль содержит только допустимые символы

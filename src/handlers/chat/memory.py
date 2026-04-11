@@ -1,19 +1,16 @@
 import asyncio
 import json
-import os
 from pathlib import Path
 
-import redis.asyncio as aioredis
 import structlog
 from agents import Runner
 
+from src.bot import rdb
 from src.handlers.checkin import ai_lock
 from src.handlers.chat.agents import summary_agent, history_summary_agent
+from src.utils import safe_json_write
 
 logger = structlog.get_logger("chat.memory")
-
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-rdb = aioredis.from_url(REDIS_URL, decode_responses=True)
 
 DATA_DIR = Path("/app/data")
 MEMORY_FILE = DATA_DIR / "rin_memory.json"
@@ -40,9 +37,7 @@ def load_memory() -> dict[str, dict]:
 
 
 def save_memory(memory: dict[str, dict]):
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with open(MEMORY_FILE, "w", encoding="utf-8") as f:
-        json.dump(memory, f, ensure_ascii=False, indent=2)
+    safe_json_write(MEMORY_FILE, memory)
 
 
 async def remember_facts(user_id: int, user_name: str, facts: list[str]):

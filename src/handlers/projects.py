@@ -1,4 +1,5 @@
 import json
+import time
 from pathlib import Path
 from datetime import datetime
 
@@ -8,6 +9,7 @@ from vkbottle.dispatch.rules import ABCRule
 from vkbottle.tools import Keyboard, Text, OpenLink, TemplateElement, template_gen
 
 from src.bot import api
+from src.utils import safe_json_write
 
 logger = structlog.get_logger("handlers.projects")
 labeler = BotLabeler()
@@ -26,9 +28,7 @@ def load_projects() -> dict[str, dict]:
 
 def save_projects(projects: dict[str, dict]) -> None:
     """Сохранить проекты в файл"""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with open(PROJECTS_FILE, "w", encoding="utf-8") as f:
-        json.dump(projects, f, ensure_ascii=False, indent=2)
+    safe_json_write(PROJECTS_FILE, projects)
 
 
 def get_next_id(projects: dict[str, dict]) -> str:
@@ -38,7 +38,7 @@ def get_next_id(projects: dict[str, dict]) -> str:
     return str(max(int(k) for k in projects.keys()) + 1)
 
 
-# Состояние для создания проекта (user_id -> step)
+CREATION_TTL = 600  # 10 минут на создание
 creation_state: dict[int, dict] = {}
 
 
@@ -52,7 +52,13 @@ class InProjectCreation(ABCRule[Message]):
 async def start_create_project(message: Message):
     """Начать создание проекта (только в ЛС)"""
     user_id = message.from_id
-    creation_state[user_id] = {"step": "name"}
+    # Очистка просроченных стейтов
+    now = time.time()
+    expired = [uid for uid, s in creation_state.items() if now - s.get("_ts", 0) > CREATION_TTL]
+    for uid in expired:
+        del creation_state[uid]
+
+    creation_state[user_id] = {"step": "name", "_ts": now}
     await message.answer(
         "Создание нового проекта\n\n"
         "Шаг 1/4: Введи название проекта:"
@@ -63,8 +69,14 @@ async def start_create_project(message: Message):
 async def handle_creation_steps(message: Message):
     """Обработка шагов создания проекта"""
     user_id = message.from_id
-    state = creation_state[user_id]
     text = message.text.strip()
+
+    if text.lower() == "/отмена":
+        del creation_state[user_id]
+        await message.answer("Создание проекта отменено")
+        return
+
+    state = creation_state[user_id]
 
     if state["step"] == "name":
         state["name"] = text

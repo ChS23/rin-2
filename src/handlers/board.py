@@ -1,4 +1,5 @@
 import json
+import time
 from pathlib import Path
 from datetime import datetime
 
@@ -8,6 +9,7 @@ from vkbottle.dispatch.rules import ABCRule
 from vkbottle.tools import Keyboard, Text, TemplateElement, template_gen
 
 from src.bot import api
+from src.utils import safe_json_write
 
 logger = structlog.get_logger("handlers.board")
 labeler = BotLabeler()
@@ -44,9 +46,7 @@ def load_board() -> dict[str, dict]:
 
 def save_board(board: dict[str, dict]) -> None:
     """Сохранить доску в файл"""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with open(BOARD_FILE, "w", encoding="utf-8") as f:
-        json.dump(board, f, ensure_ascii=False, indent=2)
+    safe_json_write(BOARD_FILE, board)
 
 
 def get_next_id(board: dict[str, dict]) -> str:
@@ -56,7 +56,7 @@ def get_next_id(board: dict[str, dict]) -> str:
     return str(max(int(k) for k in board.keys()) + 1)
 
 
-# Состояние для создания запроса
+CREATION_TTL = 600
 creation_state: dict[int, dict] = {}
 
 
@@ -136,7 +136,12 @@ async def start_create_request(message: Message):
 
     types_list = "\n".join([f"{k} — {emoji} {name}" for k, (name, emoji) in REQUEST_TYPES.items()])
 
-    creation_state[user_id] = {"step": "type"}
+    now = time.time()
+    expired = [uid for uid, s in creation_state.items() if now - s.get("_ts", 0) > CREATION_TTL]
+    for uid in expired:
+        del creation_state[uid]
+
+    creation_state[user_id] = {"step": "type", "_ts": now}
     await message.answer(
         "Создание запроса на доску\n\n"
         f"Шаг 1/4: Выбери тип:\n{types_list}\n\n"
@@ -148,8 +153,14 @@ async def start_create_request(message: Message):
 async def handle_creation_steps(message: Message):
     """Обработка шагов создания запроса"""
     user_id = message.from_id
-    state = creation_state[user_id]
     text = message.text.strip()
+
+    if text.lower() == "/отмена":
+        del creation_state[user_id]
+        await message.answer("Создание отменено")
+        return
+
+    state = creation_state[user_id]
 
     if state["step"] == "type":
         if text not in REQUEST_TYPES:

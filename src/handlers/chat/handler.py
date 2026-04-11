@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 import random
 import re
@@ -160,7 +161,10 @@ async def chat_with_rin(message: Message):
 
     try:
         async with ai_lock:
-            result = await Runner.run(chat_agent, prompt)
+            result = await asyncio.wait_for(Runner.run(chat_agent, prompt), timeout=60)
+    except asyncio.TimeoutError:
+        await logger.aerror("Таймаут AI в чате")
+        return
     except Exception as e:
         await logger.aerror("Ошибка AI в чате", error=str(e))
         return

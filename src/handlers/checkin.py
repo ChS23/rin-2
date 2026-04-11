@@ -4,7 +4,6 @@ import os
 import random
 import structlog
 
-import redis.asyncio as aioredis
 
 from agents import Agent, Runner
 from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
@@ -14,7 +13,7 @@ from apscheduler.triggers.cron import CronTrigger
 from vkbottle.dispatch.rules import ABCRule
 from vkbottle.bot import Message, BotLabeler
 
-from src.bot import api
+from src.bot import api, rdb
 
 ai_client = AsyncOpenAI(
     api_key=os.getenv("AI_API_KEY"),
@@ -29,7 +28,6 @@ import agents
 agents.set_tracing_disabled(True)
 
 ai_lock = asyncio.Lock()
-rdb = aioredis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379"), decode_responses=True)
 logger = structlog.get_logger("handlers.checkin")
 CHAT_PEER_ID = 2000000001  # chat_id=1 -> peer_id=2000000001
 
@@ -70,11 +68,20 @@ async def add_member_response(user_id: int, text: str):
     await rdb.hset(CHECKIN_MEMBERS_KEY, str(user_id), text)
 
 
+_SNAPSHOT_SCRIPT = """
+local data = redis.call('HGETALL', KEYS[1])
+redis.call('DEL', KEYS[1])
+return data
+"""
+
+
 async def snapshot_and_clear_members() -> dict[int, str]:
-    """Атомарно забрать ответы и очистить"""
-    members_raw = await rdb.hgetall(CHECKIN_MEMBERS_KEY)
-    await rdb.delete(CHECKIN_MEMBERS_KEY)
-    return {int(uid): text for uid, text in members_raw.items()}
+    """Атомарно забрать ответы и очистить через Lua"""
+    raw = await rdb.eval(_SNAPSHOT_SCRIPT, 1, CHECKIN_MEMBERS_KEY)
+    if not raw:
+        return {}
+    it = iter(raw)
+    return {int(k): v for k, v in zip(it, it)}
 
 
 class ReplyToDailyMessage(ABCRule[Message]):
@@ -205,7 +212,7 @@ async def end_of_day_checkin():
 
     await logger.ainfo("Вечерний чекаут", users_count=len(users_info))
 
-    current_day = datetime.datetime.now().strftime('%d.%m.%Y %A %B')
+    current_day = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=3))).strftime('%d.%m.%Y %A %B')
     prompt = f"Текущий день: {current_day}\n"
     if users_info:
         prompt += "Люди, которые утром рассказали о своих делах:\n" + "\n".join(users_info)
@@ -228,7 +235,7 @@ async def end_of_day_checkin():
 async def midday_checkin():
     try:
         async with ai_lock:
-            result = await Runner.run(midday_agent, f"Текущий день: {datetime.datetime.now().strftime('%d.%m.%Y %A %B')}")
+            result = await Runner.run(midday_agent, f"Текущий день: {datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=3))).strftime('%d.%m.%Y %A %B')}")
 
         response = await api.messages.send(
             peer_ids=[CHAT_PEER_ID],
@@ -243,5 +250,5 @@ async def midday_checkin():
 
 
 async def start_scheduler():
-    await logger.ainfo("Запуск планировщика", time=datetime.datetime.now().strftime('%d.%m.%Y %A %B'))
+    await logger.ainfo("Запуск планировщика", time=datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=3))).strftime('%d.%m.%Y %A %B'))
     scheduler.start()
