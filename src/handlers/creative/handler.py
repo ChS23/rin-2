@@ -31,7 +31,7 @@ class CreativeLoggingHooks(RunHooks):
 
 
 _hooks = CreativeLoggingHooks()
-_run_config = RunConfig(tracing_disabled=True)
+_run_config = RunConfig(tracing_disabled=True, max_turns=25)
 
 LAST_MSG_KEY = "rin:chat:{peer_id}:last_msg_ts"
 CREATIVE_COOLDOWN_KEY = "rin:creative:last_run"
