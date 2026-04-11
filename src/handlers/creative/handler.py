@@ -11,7 +11,7 @@ from src.handlers.creative.agent import creative_agent
 from src.handlers.chat.memory import (
     get_rin_self_state, update_rin_self_state, record_message,
 )
-from src.handlers.chat.utils import resolve_user_name
+from src.handlers.chat.utils import resolve_user_name, parse_response
 
 logger = structlog.get_logger("creative.handler")
 
@@ -80,19 +80,22 @@ async def _build_prompt(extra: str = "") -> str:
 
 GROUP_ID = 204871130
 
-from src.handlers.chat.agents import chat_agent  # noqa: E402
-
 
 async def _post_to_chat(raw_output: str):
     """Перефразировать результат через основного агента Рин и отправить в чат."""
     try:
+        # Lazy import чтобы избежать circular import при старте
+        from src.handlers.chat.agents import chat_agent
+        from src.handlers.chat.tools import PENDING_FILE_KEY
+
         prompt = f"Ты только что поработала над Частотой. Расскажи в чат коротко что сделала (1-3 предложения, без списков). Вот технический отчёт:\n{raw_output[:500]}"
         async with ai_lock:
+            await rdb.delete(PENDING_FILE_KEY)
             result = await asyncio.wait_for(
                 Runner.run(chat_agent, prompt),
                 timeout=60,
             )
-        from src.handlers.chat.utils import parse_response
+            await rdb.delete(PENDING_FILE_KEY)  # Убираем если chat_agent что-то прикрепил
         r = parse_response(result.final_output)
         if not r.text:
             return
@@ -126,9 +129,9 @@ async def _run_and_save(prompt: str, label: str, post_result: bool = True):
                     updated = updated[-15:]
                 await update_rin_self_state(updated)
 
-            # Отправляем краткий итог в чат
-            if post_result and summary:
-                await _post_to_chat(summary)
+            # Отправляем итог в чат (полный output, chat_agent сам сократит)
+            if post_result:
+                await _post_to_chat(output)
 
         await logger.ainfo("Creative: сессия завершена", output=output[:500])
     except asyncio.TimeoutError:
@@ -147,8 +150,9 @@ async def run_creative_session():
         return
 
     prompt = await _build_prompt()
-    await _run_and_save(prompt, "начинаю сессию")
+    # Ставим cooldown ДО запуска — иначе параллельный scheduled job может стартовать пока идёт _post_to_chat
     await rdb.set(CREATIVE_COOLDOWN_KEY, datetime.datetime.now().isoformat(), ex=CREATIVE_COOLDOWN_HOURS * 3600 + 60)
+    await _run_and_save(prompt, "начинаю сессию")
 
 
 TRIGGER_KEY = "rin:creative:trigger"
