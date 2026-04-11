@@ -32,6 +32,8 @@ PASSIVE_REACTION_CHANCE = 0.08
 MAX_PASSIVE_PER_DAY = 3
 _passive_reactions_today: int = 0
 _passive_reactions_date: str = ""
+_seen_messages: set[int] = set()
+_seen_max = 200
 
 
 # ═══════════════════════════════════════════════════════════
@@ -90,6 +92,14 @@ class ChatHistoryMiddleware(BaseMiddleware[Message]):
     async def pre(self):
         msg = self.event
         if msg.peer_id > 2000000000:
+            # Дедупликация — vkbottle может обработать одно сообщение дважды
+            cmid = msg.conversation_message_id
+            if cmid in _seen_messages:
+                return
+            _seen_messages.add(cmid)
+            if len(_seen_messages) > _seen_max:
+                _seen_messages.clear()
+
             if msg.text:
                 await record_message(msg.peer_id, msg.from_id, msg.text, resolve_user_name)
                 name = await resolve_user_name(msg.from_id) if msg.from_id > 0 else "бот"
@@ -126,6 +136,11 @@ class MentionsBot(ABCRule[Message]):
 
 @labeler.chat_message(MentionsBot())
 async def chat_with_rin(message: Message):
+    # Дедупликация хендлера
+    cmid = message.conversation_message_id
+    if cmid in _seen_messages:
+        return
+
     reply_count = get_reply_count(message.from_id)
     if reply_count >= HARD_REPLY_CAP:
         return
