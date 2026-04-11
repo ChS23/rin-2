@@ -23,6 +23,7 @@ from src.handlers.chat.utils import (
     get_reply_count, record_reply, mark_done, resolve_user_name,
     parse_response, get_community_context,
 )
+from src.handlers.chat.web import search_web, scrape_url, extract_urls
 
 logger = structlog.get_logger("chat.handler")
 labeler = BotLabeler()
@@ -121,6 +122,36 @@ class MentionsBot(ABCRule[Message]):
 
 
 # ═══════════════════════════════════════════════════════════
+#                      ВЕБ-ПОИСК
+# ═══════════════════════════════════════════════════════════
+
+@labeler.chat_message(text="/найди <query>")
+async def search_handler(message: Message, query: str):
+    """Поиск в интернете через Firecrawl"""
+    results = await search_web(query)
+    if not results:
+        await message.answer("Ничего не нашла, попробуй другой запрос")
+        return
+
+    user_name = await resolve_user_name(message.from_id)
+    prompt = f"Результаты поиска по запросу '{query}':\n\n{results}\n\n{user_name} попросил найти это. Кратко перескажи самое важное из результатов, 2-4 предложения."
+
+    try:
+        async with ai_lock:
+            result = await asyncio.wait_for(Runner.run(chat_agent, prompt), timeout=60)
+        r = parse_response(result.final_output)
+        await api.messages.send(
+            peer_id=message.peer_id,
+            message=r.text,
+            reply_to=message.id,
+            random_id=random.getrandbits(31),
+        )
+    except Exception as e:
+        await logger.aerror("Ошибка поиска", error=str(e))
+        await message.answer("Что-то пошло не так при поиске")
+
+
+# ═══════════════════════════════════════════════════════════
 #                       ХЕНДЛЕР ЧАТА
 # ═══════════════════════════════════════════════════════════
 
@@ -154,6 +185,13 @@ async def chat_with_rin(message: Message):
         prompt_parts.append(f"Инфо о сообществе:\n{community}")
     if context:
         prompt_parts.append(context)
+    # Веб-контекст: URL в сообщении → скрейпим
+    urls = extract_urls(text)
+    if urls:
+        page_content = await scrape_url(urls[0])
+        if page_content:
+            prompt_parts.append(f"Содержимое ссылки {urls[0]}:\n{page_content}")
+
     prompt_parts.append(REPLY_CONTEXT_PROMPT.format(reply_num=reply_count + 1))
     prompt_parts.append(f"{user_name} обращается к тебе: {text}")
 
