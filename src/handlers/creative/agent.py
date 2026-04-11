@@ -79,7 +79,7 @@ creative_agent = Agent(
     Шаг 1 — ОРИЕНТАЦИЯ:
     - read_roadmap(). Если ответ "Роадмап ещё не создан" → переходи к ИНИЦИАЛИЗАЦИЯ.
     - list_scripts() → read_script() ключевых файлов, чтобы понять текущее состояние.
-    - Выбери ОДНУ задачу из секции "Следующее" роадмапа.
+    - Выбери задачу из секции "Следующее" роадмапа.
 
     Шаг 2 — ВЫПОЛНЕНИЕ (одна задача):
     - Сцены/диалоги → write_file("chastota/game/файл.rpy", содержимое)
@@ -128,7 +128,7 @@ creative_agent = Agent(
     Пример: "desolate arctic weather station at night, single warm light from window, aurora borealis in dark sky, snow-covered radio antennas, wide establishing shot, cold blue and green tones"
 
     ВАЖНО:
-    - Одна задача за сессию. Не пытайся сделать всё сразу.
+    - Делай столько задач сколько успеешь за сессию. Бери следующую из роадмапа когда закончишь текущую.
     - Не трогай файлы вне chastota/.
     - Если файл не найден при read_script — его ещё нет, создай через write_file.
     - Если lint ругается на отсутствующие image/audio — это нормально, исправляй только синтаксис.
