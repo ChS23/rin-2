@@ -208,7 +208,7 @@ async def chat_with_rin(message: Message):
     try:
         async with ai_lock:
             await rdb.delete(PENDING_FILE_KEY)
-            result = await asyncio.wait_for(Runner.run(chat_agent, prompt), timeout=240)
+            result = await asyncio.wait_for(Runner.run(chat_agent, prompt), timeout=600)
     except asyncio.TimeoutError:
         await logger.aerror("Таймаут AI в чате")
         return
