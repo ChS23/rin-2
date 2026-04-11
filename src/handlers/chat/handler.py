@@ -148,6 +148,13 @@ class ChatHistoryMiddleware(BaseMiddleware[Message]):
                 await record_message(msg.peer_id, msg.from_id, msg.text, resolve_user_name)
                 name = await resolve_user_name(msg.from_id) if msg.from_id > 0 else "бот"
                 await logger.adebug("Сообщение в чате", user=name, text=msg.text[:50])
+            # Timestamp для creative agent (проверка тишины)
+            if msg.from_id != -GROUP_ID:
+                await rdb.set(
+                    f"rin:chat:{msg.peer_id}:last_msg_ts",
+                    datetime.datetime.now().isoformat(),
+                    ex=86400,
+                )
             if msg.from_id != -GROUP_ID and await _check_passive_limit():
                 await _do_passive_reaction(msg)
 
