@@ -10,7 +10,7 @@ from vkbottle.dispatch.rules import ABCRule
 
 from agents import Runner
 
-from src.bot import api
+from src.bot import api, rdb
 from src.handlers.checkin import ai_lock, REACTIONS, scheduler, CHAT_PEER_ID
 from src.handlers.chat.agents import chat_agent, initiative_agent
 from src.handlers.chat.memory import (
@@ -30,27 +30,29 @@ labeler = BotLabeler()
 GROUP_ID = 204871130
 PASSIVE_REACTION_CHANCE = 0.08
 MAX_PASSIVE_PER_DAY = 3
-_passive_reactions_today: int = 0
-_passive_reactions_date: str = ""
 _seen_messages: set[int] = set()
 _seen_max = 200
+
+PASSIVE_COUNT_KEY = "rin:passive_reactions:{date}"
 
 
 # ═══════════════════════════════════════════════════════════
 #                    ПАССИВНЫЕ РЕАКЦИИ
 # ═══════════════════════════════════════════════════════════
 
-def _check_passive_limit() -> bool:
-    global _passive_reactions_today, _passive_reactions_date
-    today = datetime.date.today().isoformat()
-    if _passive_reactions_date != today:
-        _passive_reactions_date = today
-        _passive_reactions_today = 0
-    return _passive_reactions_today < MAX_PASSIVE_PER_DAY
+async def _check_passive_limit() -> bool:
+    key = PASSIVE_COUNT_KEY.format(date=datetime.date.today().isoformat())
+    count = await rdb.get(key)
+    return int(count or 0) < MAX_PASSIVE_PER_DAY
+
+
+async def _incr_passive_count():
+    key = PASSIVE_COUNT_KEY.format(date=datetime.date.today().isoformat())
+    await rdb.incr(key)
+    await rdb.expire(key, 86400)
 
 
 async def _do_passive_reaction(message: Message):
-    global _passive_reactions_today
 
     has_photo = message.attachments and any(
         a.type.value == "photo" for a in message.attachments if a.type
@@ -74,7 +76,7 @@ async def _do_passive_reaction(message: Message):
                 "cmid": message.conversation_message_id,
                 "reaction_id": reaction_id,
             })
-            _passive_reactions_today += 1
+            await _incr_passive_count()
             await logger.ainfo("Пассивная реакция",
                 user_id=message.from_id,
                 reaction_id=reaction_id,
@@ -104,7 +106,7 @@ class ChatHistoryMiddleware(BaseMiddleware[Message]):
                 await record_message(msg.peer_id, msg.from_id, msg.text, resolve_user_name)
                 name = await resolve_user_name(msg.from_id) if msg.from_id > 0 else "бот"
                 await logger.adebug("Сообщение в чате", user=name, text=msg.text[:50])
-            if msg.from_id != -GROUP_ID and _check_passive_limit():
+            if msg.from_id != -GROUP_ID and await _check_passive_limit():
                 await _do_passive_reaction(msg)
 
 
@@ -141,7 +143,7 @@ async def chat_with_rin(message: Message):
     if cmid in _seen_messages:
         return
 
-    reply_count = get_reply_count(message.from_id)
+    reply_count = await get_reply_count(message.from_id)
     if reply_count >= HARD_REPLY_CAP:
         return
 
@@ -184,7 +186,7 @@ async def chat_with_rin(message: Message):
         await logger.aerror("Ошибка AI в чате", error=str(e))
         return
 
-    record_reply(message.from_id)
+    await record_reply(message.from_id)
     r = parse_response(result.final_output)
 
     await api.messages.send(
@@ -212,7 +214,7 @@ async def chat_with_rin(message: Message):
         await maybe_compress_memory(message.from_id)
 
     if r.done:
-        mark_done(message.from_id)
+        await mark_done(message.from_id)
 
     await logger.ainfo("Рин ответила",
         user_id=message.from_id,

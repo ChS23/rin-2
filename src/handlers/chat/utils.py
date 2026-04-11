@@ -5,15 +5,15 @@ import time
 import structlog
 from pydantic import BaseModel
 
-from src.bot import api
+from src.bot import api, rdb
 
 logger = structlog.get_logger("chat.utils")
 
-REPLY_LIMIT = 5
+HARD_REPLY_CAP = 15
 REPLY_WINDOW = 10 * 60
 MAX_NAME_CACHE = 500
+REPLY_KEY_PREFIX = "rin:replies:{user_id}"
 
-_user_reply_times: dict[int, list[float]] = {}
 _user_names_cache: dict[int, str] = {}
 
 
@@ -49,24 +49,26 @@ REPLY_CONTEXT_PROMPT = """
 """.strip()
 
 
-def get_reply_count(user_id: int) -> int:
+async def get_reply_count(user_id: int) -> int:
     """Сколько ответов этому пользователю за последнее окно"""
-    now = time.time()
-    times = _user_reply_times.get(user_id, [])
-    times = [t for t in times if now - t < REPLY_WINDOW]
-    _user_reply_times[user_id] = times
-    return len(times)
+    key = REPLY_KEY_PREFIX.format(user_id=user_id)
+    count = await rdb.llen(key)
+    return count
 
 
-def record_reply(user_id: int):
-    if user_id not in _user_reply_times:
-        _user_reply_times[user_id] = []
-    _user_reply_times[user_id].append(time.time())
+async def record_reply(user_id: int):
+    key = REPLY_KEY_PREFIX.format(user_id=user_id)
+    await rdb.rpush(key, str(time.time()))
+    await rdb.expire(key, REPLY_WINDOW)
 
 
-def mark_done(user_id: int):
+async def mark_done(user_id: int):
     """Пометить что Рин ушла от этого пользователя"""
-    _user_reply_times[user_id] = [time.time()] * HARD_REPLY_CAP
+    key = REPLY_KEY_PREFIX.format(user_id=user_id)
+    await rdb.delete(key)
+    for _ in range(HARD_REPLY_CAP):
+        await rdb.rpush(key, str(time.time()))
+    await rdb.expire(key, REPLY_WINDOW)
 
 
 async def resolve_user_name(user_id: int) -> str:
