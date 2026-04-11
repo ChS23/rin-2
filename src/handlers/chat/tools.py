@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 import aiofiles
+import aiohttp
 import structlog
 from agents import function_tool
 from firecrawl import FirecrawlApp
@@ -124,4 +125,52 @@ def list_scripts() -> str:
     return "\n".join(lines)
 
 
-all_tools = [web_search, read_url, write_script, read_script, list_scripts]
+ALLOWED_EXTS = {
+    ".ogg", ".mp3", ".wav", ".flac",           # аудио
+    ".png", ".jpg", ".jpeg", ".gif", ".webp",  # картинки
+    ".pdf", ".txt", ".md", ".csv",             # документы
+    ".zip",                                     # архивы
+}
+MAX_DOWNLOAD_BYTES = 30 * 1024 * 1024  # 30 MB
+
+
+@function_tool
+async def download_file(url: str, filename: str) -> str:
+    """Скачать файл по URL и прикрепить к ответу.
+    url — прямая ссылка на файл.
+    filename — имя файла для сохранения, например 'wind_ambient.ogg' или 'reference.png'."""
+    try:
+        file_path = _safe_path(filename)
+    except ValueError:
+        return "Недопустимый путь файла"
+    if file_path.suffix.lower() not in ALLOWED_EXTS:
+        return f"Недопустимое расширение. Разрешены: {', '.join(sorted(ALLOWED_EXTS))}"
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                if resp.status != 200:
+                    return f"Ошибка загрузки: HTTP {resp.status}"
+                content_length = resp.content_length
+                if content_length and content_length > MAX_DOWNLOAD_BYTES:
+                    return f"Файл слишком большой ({content_length // 1024 // 1024} MB, лимит 30 MB)"
+                data = bytearray()
+                async for chunk in resp.content.iter_chunked(65536):
+                    data.extend(chunk)
+                    if len(data) > MAX_DOWNLOAD_BYTES:
+                        return "Файл слишком большой (лимит 30 MB)"
+
+        async with aiofiles.open(file_path, "wb") as f:
+            await f.write(data)
+
+        size_kb = len(data) // 1024
+        rel = file_path.relative_to(SCRIPTS_DIR)
+        await rdb.set(PENDING_FILE_KEY, str(file_path), ex=300)
+        await logger.ainfo("Файл скачан", filename=str(rel), size_kb=size_kb, url=url)
+        return f"Файл {rel} скачан ({size_kb} KB)"
+    except Exception as e:
+        return f"Не удалось скачать: {e}"
+
+
+all_tools = [web_search, read_url, write_script, read_script, list_scripts, download_file]
