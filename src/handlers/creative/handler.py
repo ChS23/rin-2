@@ -48,11 +48,11 @@ async def _can_run() -> bool:
 async def run_creative_session():
     """Запустить одну creative сессию — Рин работает над Частотой."""
     if not await _can_run():
-        await logger.adebug("Creative: кулдаун не прошёл")
+        await logger.ainfo("Creative: пропуск — кулдаун не прошёл")
         return
 
     if not await _chat_is_quiet(CHAT_PEER_ID):
-        await logger.adebug("Creative: чат активен, пропускаем")
+        await logger.ainfo("Creative: пропуск — чат активен")
         return
 
     self_state = await get_rin_self_state()
@@ -68,6 +68,8 @@ async def run_creative_session():
 
     prompt = "\n\n".join(prompt_parts)
 
+    await logger.ainfo("Creative: начинаю сессию")
+
     try:
         async with ai_lock:
             result = await asyncio.wait_for(
@@ -81,23 +83,35 @@ async def run_creative_session():
         )
 
         output = result.final_output or ""
+
+        # Логируем использованные инструменты
+        tool_names = []
+        for item in result.raw_responses:
+            if hasattr(item, "output") and hasattr(item.output, "tool_calls"):
+                for tc in item.output.tool_calls:
+                    if hasattr(tc, "function"):
+                        tool_names.append(tc.function.name)
+
         # Обновляем self_state если агент что-то сделал
         if output:
             current = await get_rin_self_state()
             summary = output[:200].strip()
             if summary:
                 updated = current + [f"[creative] {summary}"]
-                # Не больше 15 записей
                 if len(updated) > 15:
                     updated = updated[-15:]
                 await update_rin_self_state(updated)
 
-        await logger.ainfo("Creative сессия завершена", output=output[:300])
+        await logger.ainfo(
+            "Creative: сессия завершена",
+            output=output[:500],
+            tools_used=tool_names[:20] if tool_names else None,
+        )
 
     except asyncio.TimeoutError:
         await logger.aerror("Creative: таймаут (600с)")
     except Exception as e:
-        await logger.aerror("Creative: ошибка", error=str(e))
+        await logger.aerror("Creative: ошибка", error=str(e), exc_info=True)
 
 
 # Расписание: ночью в 1:00 и 3:00 (когда Рин по лору работает)

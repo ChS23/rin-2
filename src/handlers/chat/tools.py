@@ -352,10 +352,10 @@ async def compose_midi(filename: str, bpm: int, tracks: list[MidiTrack], max_sec
     if not wav_path.exists():
         return f"Ошибка рендера FluidSynth: {stderr.decode()[:300]}"
 
-    # WAV → OGG Opus через opusenc (VK audio_message требует Opus)
+    # WAV → OGG Opus через opusenc (VK audio_message требует моно Opus)
     proc2 = await asyncio.create_subprocess_exec(
         "opusenc", str(wav_path), str(ogg_path),
-        "--bitrate", "64",
+        "--bitrate", "96", "--downmix-mono",
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.PIPE,
     )
