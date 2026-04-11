@@ -18,8 +18,8 @@ from src.handlers.chat.memory import (
     get_user_memory, get_all_memory_summary,
 )
 from src.handlers.chat.utils import (
-    REPLY_LIMIT_PROMPT,
-    get_remaining_replies, record_reply, resolve_user_name,
+    REPLY_CONTEXT_PROMPT, HARD_REPLY_CAP,
+    get_reply_count, record_reply, mark_done, resolve_user_name,
     parse_response, get_community_context,
 )
 
@@ -125,8 +125,8 @@ class MentionsBot(ABCRule[Message]):
 
 @labeler.chat_message(MentionsBot())
 async def chat_with_rin(message: Message):
-    remaining = get_remaining_replies(message.from_id)
-    if remaining <= 0:
+    reply_count = get_reply_count(message.from_id)
+    if reply_count >= HARD_REPLY_CAP:
         return
 
     text = message.text or ""
@@ -153,7 +153,7 @@ async def chat_with_rin(message: Message):
         prompt_parts.append(f"Инфо о сообществе:\n{community}")
     if context:
         prompt_parts.append(context)
-    prompt_parts.append(REPLY_LIMIT_PROMPT.format(remaining=remaining))
+    prompt_parts.append(REPLY_CONTEXT_PROMPT.format(reply_num=reply_count + 1))
     prompt_parts.append(f"{user_name} обращается к тебе: {text}")
 
     prompt = "\n\n".join(prompt_parts)
@@ -192,12 +192,17 @@ async def chat_with_rin(message: Message):
         await remember_facts(message.from_id, user_name, r.remember)
         await maybe_compress_memory(message.from_id)
 
+    if r.done:
+        mark_done(message.from_id)
+
     await logger.ainfo("Рин ответила",
         user_id=message.from_id,
         user_name=user_name,
         input=text,
         reaction=r.reaction,
         remembered=r.remember or None,
+        done=r.done,
+        reply_num=reply_count + 1,
     )
 
 

@@ -22,33 +22,51 @@ class RinResponse(BaseModel):
     reaction: str | None = None
     remember: list[str] | None = None
     forget: list[str] | None = None
+    done: bool = False
 
 
-REPLY_LIMIT_PROMPT = """
-Когда тебе пишет один и тот же человек подряд, ты не обязана отвечать бесконечно — ты живая, у тебя свои дела.
+HARD_REPLY_CAP = 15
+REPLY_WINDOW = 10 * 60
 
-Сейчас тебе осталось {remaining} ответов этому человеку (из 5 за 10 минут).
-- 4-5: общайся как обычно.
-- 2-3: отвечай короче, можешь отвлекаться, терять интерес.
-- 1: сворачивай разговор естественно — "ладн, мне пора", "пойду", "потом доболтаем".
-- 0: это твоя последняя реплика. Попрощайся по-своему и уходи. Не объясняй лимиты — просто уходи как живой человек.
+REPLY_CONTEXT_PROMPT = """
+Это твой {reply_num}-й ответ этому человеку за последние 10 минут.
 
-Не упоминай счётчик, лимиты или то, что ты "бот". Ты просто устала или тебе стало скучно — это нормально.
+Ты сама решаешь, хочешь ли продолжать разговор. Поставь "done": true если хочешь уйти, false если хочешь продолжить.
+
+ОСТАВАЙСЯ (done: false) если:
+- Человек задаёт технический вопрос (Ren'Py, код, арт, движки) и ты реально помогаешь
+- Обсуждается конкретный проект и ты можешь быть полезна
+- Разговор интересный и содержательный
+
+УХОДИ (done: true) если:
+- Просто болтовня ни о чём, и ты уже ответила 3+ раз
+- Человек троллит, флиртует или несёт ерунду
+- Разговор зацикливается, повторяется одно и то же
+- Ты уже помогла и вопрос решён
+- Тебе просто "надоело" — это нормально, ты живой человек
+
+Когда уходишь — попрощайся естественно, не объясняй почему. Не упоминай лимиты или что ты "бот".
 """.strip()
 
 
-def get_remaining_replies(user_id: int) -> int:
+def get_reply_count(user_id: int) -> int:
+    """Сколько ответов этому пользователю за последнее окно"""
     now = time.time()
     times = _user_reply_times.get(user_id, [])
     times = [t for t in times if now - t < REPLY_WINDOW]
     _user_reply_times[user_id] = times
-    return max(0, REPLY_LIMIT - len(times))
+    return len(times)
 
 
 def record_reply(user_id: int):
     if user_id not in _user_reply_times:
         _user_reply_times[user_id] = []
     _user_reply_times[user_id].append(time.time())
+
+
+def mark_done(user_id: int):
+    """Пометить что Рин ушла от этого пользователя"""
+    _user_reply_times[user_id] = [time.time()] * HARD_REPLY_CAP
 
 
 async def resolve_user_name(user_id: int) -> str:
@@ -81,6 +99,7 @@ def parse_response(raw) -> RinResponse:
             reaction=data.get("reaction"),
             remember=data.get("remember"),
             forget=data.get("forget"),
+            done=bool(data.get("done", False)),
         )
     except (json.JSONDecodeError, AttributeError):
         pass
