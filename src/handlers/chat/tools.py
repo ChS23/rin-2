@@ -1,4 +1,3 @@
-import asyncio
 import os
 from pathlib import Path
 
@@ -6,10 +5,12 @@ import structlog
 from agents import function_tool
 from firecrawl import FirecrawlApp
 
+from src.bot import rdb
+
 logger = structlog.get_logger("chat.tools")
 
 SCRIPTS_DIR = Path("/app/data/scripts")
-_file_registry: dict[int, str] = {}  # task id -> file path
+PENDING_FILE_KEY = "rin:pending_file"
 
 FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY")
 _fc = FirecrawlApp(api_key=FIRECRAWL_API_KEY) if FIRECRAWL_API_KEY else None
@@ -56,7 +57,7 @@ def read_url(url: str) -> str:
 
 
 @function_tool
-def write_script(filename: str, content: str) -> str:
+async def write_script(filename: str, content: str) -> str:
     """Написать Python или Ren'Py файл и прикрепить его к ответу.
     filename — имя файла, например 'persistent_example.py' или 'scene_lab.rpy'.
     content — полное содержимое файла."""
@@ -67,9 +68,7 @@ def write_script(filename: str, content: str) -> str:
     safe_name = safe_name[-64:]
     file_path = SCRIPTS_DIR / safe_name
     file_path.write_text(content, encoding="utf-8")
-    task = asyncio.current_task()
-    if task:
-        _file_registry[id(task)] = str(file_path)
+    await rdb.set(PENDING_FILE_KEY, str(file_path), ex=300)
     return f"Файл {safe_name} готов ({len(content.splitlines())} строк)"
 
 

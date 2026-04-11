@@ -17,7 +17,7 @@ from agents import Runner
 from src.bot import api, rdb
 from src.handlers.checkin import ai_lock, REACTIONS, scheduler, CHAT_PEER_ID
 from src.handlers.chat.agents import chat_agent, initiative_agent
-from src.handlers.chat.tools import _file_registry
+from src.handlers.chat.tools import PENDING_FILE_KEY
 from src.handlers.chat.memory import (
     record_message, get_context,
     remember_facts, forget_facts, maybe_compress_memory,
@@ -53,6 +53,8 @@ async def _upload_doc(peer_id: int, file_path: str) -> str | None:
     except Exception as e:
         await logger.awarn("Не удалось загрузить файл", error=str(e), path=file_path)
         return None
+
+
 PASSIVE_REACTION_CHANCE = 0.08
 MAX_PASSIVE_PER_DAY = 3
 _seen_messages: set[int] = set()
@@ -209,11 +211,9 @@ async def chat_with_rin(message: Message):
 
     prompt = "\n\n".join(prompt_parts)
 
-    current_task = asyncio.current_task()
-    task_id = id(current_task) if current_task else 0
-
     try:
         async with ai_lock:
+            await rdb.delete(PENDING_FILE_KEY)  # сброс стейла от предыдущего запроса
             result = await asyncio.wait_for(Runner.run(chat_agent, prompt), timeout=120)
     except asyncio.TimeoutError:
         await logger.aerror("Таймаут AI в чате")
@@ -222,7 +222,7 @@ async def chat_with_rin(message: Message):
         await logger.aerror("Ошибка AI в чате", error=str(e))
         return
 
-    file_path = _file_registry.pop(task_id, None)
+    file_path = await rdb.getdel(PENDING_FILE_KEY)
     attachment = await _upload_doc(message.peer_id, file_path) if file_path else None
 
     await record_reply(message.from_id)
