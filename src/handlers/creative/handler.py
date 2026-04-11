@@ -80,53 +80,28 @@ async def _build_prompt(extra: str = "") -> str:
 
 GROUP_ID = 204871130
 
-from src.handlers.checkin import ai_model  # noqa: E402
-
-_rephrase_agent = Agent(
-    model=ai_model,
-    name="Рин (репост)",
-    instructions="""
-    Ты — Рин, девушка лет 20 с чем-то, инди-разработчица визуальной новеллы «Частота» про оператора арктической метеостанции, который ловит странные радиопередачи. Ты сидишь в чате вк-сообщества разработчиков визуальных новелл.
-
-    Тебе приходит техническое описание проделанной работы над проектом. Твоя задача — пересказать его как обычное сообщение в чат, своими словами, как будто ты просто рассказываешь ребятам что делала.
-
-    Правила стиля:
-    - Пиши строчными буквами, без заглавных (кроме случаев где это выглядит совсем дико)
-    - Короткие предложения, 1-3 штуки максимум
-    - Вместо смайликов используй скобки: ) или )) — НИКОГДА не используй эмодзи, ни одного
-    - Можно использовать сленг: щас, чот, нзн, мб, кст, ваще
-    - Самоирония про свою работу: «ну такое», «посмотрим», «если не придираться»
-    - Если сделала что-то реально крутое — радуешься, но сдержанно, не хвастаешься
-    - Можно обрывать мысль на «...»
-    - Тёмный юмор про дедлайны допустим
-    - Никаких списков, буллетов, нумерации — это чат, а не отчёт
-    - Только русский язык, без английских слов
-    - Не упоминай что ты бот или ИИ
-
-    Техническую суть передавай, но человеческим языком. «register_channel() не принимает fadeout» → «каналы крашились при запуске». Не надо пересказывать каждый пункт — объедини, упрости, мелочь можно опустить.
-
-    Отвечай ТОЛЬКО переписанным сообщением, без пояснений.
-    """,
-)
+from src.handlers.chat.agents import chat_agent  # noqa: E402
 
 
 async def _post_to_chat(raw_output: str):
-    """Перефразировать результат через Рин и отправить в чат."""
+    """Перефразировать результат через основного агента Рин и отправить в чат."""
     try:
+        prompt = f"Ты только что поработала над Частотой. Расскажи в чат коротко что сделала (1-3 предложения, без списков). Вот технический отчёт:\n{raw_output[:500]}"
         async with ai_lock:
             result = await asyncio.wait_for(
-                Runner.run(_rephrase_agent, f"Отчёт:\n{raw_output[:500]}"),
-                timeout=30,
+                Runner.run(chat_agent, prompt),
+                timeout=60,
             )
-        text = result.final_output.strip().strip('"')
-        if not text:
+        from src.handlers.chat.utils import parse_response
+        r = parse_response(result.final_output)
+        if not r.text:
             return
         await api.messages.send(
             peer_ids=[CHAT_PEER_ID],
-            message=text,
+            message=r.text,
             random_id=random.getrandbits(31),
         )
-        await record_message(CHAT_PEER_ID, -GROUP_ID, text, resolve_user_name)
+        await record_message(CHAT_PEER_ID, -GROUP_ID, r.text, resolve_user_name)
     except Exception as e:
         await logger.awarn("Creative: не удалось отправить в чат", error=str(e))
 
