@@ -214,7 +214,7 @@ async def chat_with_rin(message: Message):
 
     try:
         async with ai_lock:
-            result = await asyncio.wait_for(Runner.run(chat_agent, prompt), timeout=60)
+            result = await asyncio.wait_for(Runner.run(chat_agent, prompt), timeout=120)
     except asyncio.TimeoutError:
         await logger.aerror("Таймаут AI в чате")
         return
