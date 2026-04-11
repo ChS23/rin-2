@@ -168,8 +168,11 @@ async def run_forced_session():
         await logger.aerror("Creative: ошибка", error=str(e), exc_info=True)
 
 
-# Проверка триггера каждые 30 секунд
-@scheduler.scheduled_job(trigger="interval", seconds=30)
+# Проверка триггера каждые 30 секунд (coalesce + misfire подавляют спам)
+@scheduler.scheduled_job(
+    trigger="interval", seconds=30,
+    max_instances=1, coalesce=True, misfire_grace_time=60,
+)
 async def check_creative_trigger():
     trigger = await rdb.getdel(TRIGGER_KEY)
     if trigger:
