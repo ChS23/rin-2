@@ -80,10 +80,37 @@ async def _build_prompt(extra: str = "") -> str:
 
 GROUP_ID = 204871130
 
+from src.handlers.chat.agents import RIN_LORE  # noqa: E402
+from src.handlers.checkin import ai_model  # noqa: E402
 
-async def _post_to_chat(text: str):
-    """Отправить результат creative сессии в чат."""
+_rephrase_agent = Agent(
+    model=ai_model,
+    name="Рин (репост)",
+    instructions=f"""
+    {RIN_LORE}
+
+    Тебе дан технический отчёт о том, что ты сделала в проекте "Частота" за ночную рабочую сессию.
+    Перепиши это как КОРОТКОЕ сообщение в чат (1-3 предложения), в своём стиле.
+    Примеры:
+    - "поработала ночью, дописала день 3 первого лупа и сгенерила фон для радиорубки. lint чистый, ура"
+    - "починила аудиоканалы, они ломались при запуске. заодно набросала переходы между лупами"
+    - "сижу пишу второй луп... ну точнее написала скелет. завтра доделаю"
+    Не будь формальной, не пиши списки. Просто скажи что сделала, как будто рассказываешь другу.
+    Верни ТОЛЬКО текст сообщения.
+    """,
+)
+
+
+async def _post_to_chat(raw_output: str):
+    """Перефразировать результат через Рин и отправить в чат."""
     try:
+        result = await asyncio.wait_for(
+            Runner.run(_rephrase_agent, f"Отчёт:\n{raw_output[:500]}"),
+            timeout=30,
+        )
+        text = result.final_output.strip().strip('"')
+        if not text:
+            return
         await api.messages.send(
             peer_ids=[CHAT_PEER_ID],
             message=text,
