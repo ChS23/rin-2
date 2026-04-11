@@ -9,13 +9,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     wget \
     bzip2 \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# Ren'Py SDK для lint/compile (headless)
+# Ren'Py SDK для lint/compile/web_build (headless)
 RUN wget -q https://www.renpy.org/dl/8.5.2/renpy-8.5.2-sdk.tar.bz2 \
     && tar xf renpy-8.5.2-sdk.tar.bz2 \
     && mv renpy-8.5.2-sdk /opt/renpy \
-    && rm renpy-8.5.2-sdk.tar.bz2
+    && rm renpy-8.5.2-sdk.tar.bz2 \
+    && wget -q https://www.renpy.org/dl/8.5.2/renpy-8.5.2-web.zip \
+    && unzip -q renpy-8.5.2-web.zip -d /opt/renpy \
+    && rm renpy-8.5.2-web.zip
 
 COPY . /app
 

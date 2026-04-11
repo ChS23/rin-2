@@ -149,12 +149,39 @@ def update_roadmap(content: str) -> str:
     return "Роадмап обновлён"
 
 
+WEB_BUILD_DIR = SCRIPTS_DIR / "chastota_web"
+
+
+@function_tool
+async def renpy_web_build() -> str:
+    """Собрать веб-версию игры (HTML+WASM). Результат в папке chastota_web/."""
+    if not GAME_DIR.exists():
+        return "Папка game/ не существует"
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            RENPY_SH, "/opt/renpy/launcher", "web_build",
+            str(PROJECT_DIR), "--destination", str(WEB_BUILD_DIR),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env={"HOME": "/tmp", "PATH": "/usr/bin:/bin:/opt/renpy"},
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+        if proc.returncode == 0:
+            return f"Веб-билд готов в {WEB_BUILD_DIR}"
+        output = stdout.decode() + stderr.decode()
+        return f"Ошибка web_build:\n{output[:1000]}"
+    except asyncio.TimeoutError:
+        return "Таймаут web_build (>120с)"
+    except Exception as e:
+        return f"Ошибка: {e}"
+
+
 # Все инструменты для creative agent
 creative_tools = [
     write_file, edit_file, read_script, list_scripts,
     create_image,
     read_roadmap, update_roadmap,
-    renpy_lint, renpy_compile,
+    renpy_lint, renpy_compile, renpy_web_build,
 ]
 
 music_creative_tools = [compose_midi]
