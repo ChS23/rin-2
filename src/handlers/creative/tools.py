@@ -34,6 +34,7 @@ async def read_file(filename: str, offset: int = 0, limit: int = 200) -> str:
     filename — путь относительно папки скриптов, например 'chastota/game/script.rpy'.
     offset — с какой строки начать (0 = сначала).
     limit — сколько строк читать (по умолчанию 200). Для больших файлов читай частями."""
+    await logger.adebug("read_file", filename=filename, offset=offset, limit=limit)
     try:
         file_path = _safe_path(filename)
     except ValueError:
@@ -212,6 +213,7 @@ async def bash(command: str, timeout: int = 30) -> str:
     timeout — таймаут в секундах (по умолчанию 30, максимум 120).
     Используй для: ls, du, wc, diff, head, tail, cp, chmod, tree, и любых команд которых нет в других инструментах.
     Не используй для: редактирования файлов (есть edit_file), поиска (есть grep_files/find_files)."""
+    await logger.ainfo("bash", command=command[:200])
     timeout = max(5, min(120, timeout))
     try:
         proc = await asyncio.create_subprocess_shell(

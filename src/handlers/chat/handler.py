@@ -12,7 +12,7 @@ from vkbottle import BaseMiddleware
 from vkbottle.bot import Message, BotLabeler
 from vkbottle.dispatch.rules import ABCRule
 
-from agents import Runner
+from agents import Runner, RunHooks
 
 from src.bot import api, rdb
 from src.handlers.checkin import ai_lock, REACTIONS, scheduler, CHAT_PEER_ID
@@ -31,6 +31,18 @@ from src.handlers.chat.utils import (
 
 logger = structlog.get_logger("chat.handler")
 labeler = BotLabeler()
+
+
+class ChatLoggingHooks(RunHooks):
+    async def on_tool_start(self, context, agent, tool, **kwargs):
+        await logger.ainfo("Tool call", agent=agent.name, tool=tool.name)
+
+    async def on_tool_end(self, context, agent, tool, result, **kwargs):
+        short = (str(result) or "")[:150]
+        await logger.ainfo("Tool result", tool=tool.name, result=short)
+
+
+_chat_hooks = ChatLoggingHooks()
 
 GROUP_ID = 204871130
 
@@ -256,7 +268,7 @@ async def chat_with_rin(message: Message):
     try:
         async with ai_lock:
             await rdb.delete(PENDING_FILE_KEY)
-            result = await asyncio.wait_for(Runner.run(chat_agent, prompt), timeout=600)
+            result = await asyncio.wait_for(Runner.run(chat_agent, prompt, hooks=_chat_hooks), timeout=600)
     except asyncio.TimeoutError:
         await logger.aerror("Таймаут AI в чате")
         return
@@ -275,6 +287,7 @@ async def chat_with_rin(message: Message):
     r = parse_response(result.final_output)
     if upload_failed:
         r.text = (r.text or "") + "\n\n(файл не прикрепился — ВК не принял загрузку)"
+        await logger.awarn("Upload failed, добавлено уведомление", path=file_path)
 
     if not r.text:
         await update_last_seen(message.from_id)
@@ -293,8 +306,9 @@ async def chat_with_rin(message: Message):
             }).decode(),
             random_id=random.getrandbits(31),
         )
-    except Exception:
+    except Exception as reply_err:
         # Если reply не удался — отправляем без reply
+        await logger.awarn("Reply failed, отправка без reply", error=str(reply_err))
         await api.messages.send(
             peer_id=message.peer_id,
             message=r.text,

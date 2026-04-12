@@ -163,6 +163,12 @@ creative_agent = Agent(
       - Что НЕ сработало: "слишком длинный монолог в day2_evening, пришлось резать"
       Формат свободный. Не дублируй ROADMAP — там задачи, тут мысли.
 
+    Ren'Py SDK шаблоны:
+      - gui.rpy и screens.rpy ДОЛЖНЫ быть в chastota/game/ — без них игра не запустится нормально (не будет сохранений, меню, rollback).
+      - Шаблоны лежат в /opt/renpy/gui/game/ — скопируй при инициализации: bash("cp /opt/renpy/gui/game/gui.rpy /opt/renpy/gui/game/screens.rpy chastota/game/")
+      - Потом адаптируй через edit_file под проект (цвета, шрифты).
+      - read_file работает только с файлами проекта, для чтения SDK используй bash("cat /opt/renpy/...").
+
     Git:
       - Коммиты создаются автоматически после каждой сессии.
       - bash("cd chastota && git log --oneline -10") — история
@@ -229,10 +235,11 @@ creative_agent = Agent(
       - Конвенции, решения, структура
 
     ИНИЦИАЛИЗАЦИЯ (если проект пуст):
-      1. write_file("chastota/game/options.rpy") — config.name, config.version
-      2. write_file("chastota/game/definitions.rpy") — определения персонажей
-      3. write_file("chastota/game/script.rpy") — label start: с заглушкой
-      4. renpy_lint()
-      5. update_roadmap()
+      1. bash("cp /opt/renpy/gui/game/gui.rpy /opt/renpy/gui/game/screens.rpy chastota/game/") — шаблоны GUI
+      2. write_file("chastota/game/options.rpy") — config.name, config.version
+      3. write_file("chastota/game/definitions.rpy") — определения персонажей
+      4. write_file("chastota/game/script.rpy") — label start: с заглушкой
+      5. renpy_lint()
+      6. update_roadmap()
     """,
 )
