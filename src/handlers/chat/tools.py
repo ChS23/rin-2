@@ -436,5 +436,33 @@ async def generate_image(description: str, style: str = "digital art", selfie: b
         return f"Ошибка: {e}"
 
 
-all_tools = [web_search, read_url, write_script, edit_file, read_script, list_scripts, send_file, download_file, create_archive, generate_image]
+CATBOX_API = "https://catbox.moe/user/api.php"
+
+
+@function_tool
+async def upload_to_catbox(filename: str) -> str:
+    """Загрузить файл на catbox.moe и получить прямую ссылку. Используй когда ВК не принимает файл.
+    filename — путь относительно папки скриптов."""
+    try:
+        file_path = _safe_path(filename)
+    except ValueError:
+        return "Недопустимый путь файла"
+    if not file_path.exists():
+        return f"Файл {filename} не найден"
+    try:
+        async with aiohttp.ClientSession() as session:
+            with open(file_path, "rb") as f:
+                data = aiohttp.FormData()
+                data.add_field("reqtype", "fileupload")
+                data.add_field("fileToUpload", f, filename=file_path.name)
+                async with session.post(CATBOX_API, data=data, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                    url = await resp.text()
+                    if resp.status == 200 and url.startswith("https://"):
+                        return url.strip()
+                    return f"Ошибка catbox: {resp.status} {url[:200]}"
+    except Exception as e:
+        return f"не удалось загрузить на catbox: {e}"
+
+
+all_tools = [web_search, read_url, write_script, edit_file, read_script, list_scripts, send_file, download_file, create_archive, generate_image, upload_to_catbox]
 music_tools = [compose_midi]

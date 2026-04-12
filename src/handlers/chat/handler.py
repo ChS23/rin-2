@@ -50,7 +50,7 @@ GROUP_ID = 204871130
 AUDIO_EXTS = {".ogg", ".mp3", ".wav", ".flac", ".opus"}
 
 
-async def _upload_doc(peer_id: int, file_path: str) -> str | None:
+async def _upload_doc(peer_id: int, file_path: str, _retry: int = 0) -> str | None:
     """Загрузить файл как документ VK и вернуть attachment string."""
     try:
         ext = Path(file_path).suffix.lower()
@@ -65,9 +65,17 @@ async def _upload_doc(peer_id: int, file_path: str) -> str | None:
                     try:
                         result = orjson.loads(raw)
                     except (orjson.JSONDecodeError, ValueError):
+                        if _retry < 1:
+                            await logger.awarn("VK upload: retry", path=file_path)
+                            await asyncio.sleep(2)
+                            return await _upload_doc(peer_id, file_path, _retry + 1)
                         await logger.awarn("VK upload: ответ не JSON", response=raw[:300], path=file_path)
                         return None
         if "file" not in result:
+            if _retry < 1:
+                await logger.awarn("VK upload: retry (no file)", path=file_path)
+                await asyncio.sleep(2)
+                return await _upload_doc(peer_id, file_path, _retry + 1)
             await logger.awarn("VK upload: нет поля file", response=raw[:300], path=file_path)
             return None
         saved = await api.docs.save(file=result["file"], title=Path(file_path).name)
@@ -156,10 +164,14 @@ class ChatHistoryMiddleware(BaseMiddleware[Message]):
             if len(_seen_messages) > _seen_max:
                 _seen_messages.clear()
 
-            if msg.text:
-                await record_message(msg.peer_id, msg.from_id, msg.text, resolve_user_name)
+            text = msg.text or ""
+            att_desc = _extract_attachments(msg)
+            if att_desc:
+                text = (text + " " + " ".join(att_desc)).strip()
+            if text:
+                await record_message(msg.peer_id, msg.from_id, text, resolve_user_name)
                 name = await resolve_user_name(msg.from_id) if msg.from_id > 0 else "бот"
-                await logger.adebug("Сообщение в чате", user=name, text=msg.text[:50])
+                await logger.adebug("Сообщение в чате", user=name, text=text[:80])
             # Timestamp для creative agent (проверка тишины)
             if msg.from_id != -GROUP_ID:
                 await rdb.set(
@@ -286,7 +298,7 @@ async def chat_with_rin(message: Message):
 
     r = parse_response(result.final_output)
     if upload_failed:
-        r.text = (r.text or "") + "\n\n(файл не прикрепился — ВК не принял загрузку)"
+        r.text = (r.text or "") + "\n\n(чот вк не грузит файл, попробуйте позже)"
         await logger.awarn("Upload failed, добавлено уведомление", path=file_path)
 
     if not r.text:

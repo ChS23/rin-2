@@ -21,6 +21,13 @@ class RinResponse(BaseModel):
     forget: list[str] | None = None
     self_update: list[str] | None = None
 
+    @field_validator("reaction", mode="before")
+    @classmethod
+    def coerce_reaction(cls, v):
+        if v is None or v == "null" or v == "none" or v == "":
+            return None
+        return str(v)
+
     @field_validator("remember", "forget", "self_update", mode="before")
     @classmethod
     def coerce_str_list(cls, v):

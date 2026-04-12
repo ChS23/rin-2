@@ -317,7 +317,8 @@ async def analyze_image(image_url: str, question: str = "Опиши что на 
             data_url = f"data:{ct};base64,{b64}"
             content.append({"type": "image_url", "image_url": {"url": data_url}})
         except Exception as e:
-            return f"Ошибка скачивания картинки: {e}"
+            await logger.awarn("Image download error", error=str(e), url=image_url[:100])
+            return "не могу скачать картинку, ссылка не грузится"
 
     try:
         resp = await _vision_client.chat.completions.create(
@@ -330,7 +331,8 @@ async def analyze_image(image_url: str, question: str = "Опиши что на 
             result = result[:3000] + "\n\n[...обрезано]"
         return result
     except Exception as e:
-        return f"Ошибка vision: {e}"
+        await logger.awarn("Vision error", error=str(e), url=image_url[:100])
+        return "не получилось разглядеть картинку, вк чот не грузит или формат кривой"
 
 
 # ═══════════════════════════════════════════════════════════
