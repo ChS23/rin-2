@@ -115,6 +115,28 @@ async def _post_to_chat(raw_output: str):
         await logger.awarn("Creative: не удалось отправить в чат", error=str(e))
 
 
+from src.handlers.creative.tools import PROJECT_DIR  # noqa: E402
+
+
+async def _git_auto_commit(summary: str):
+    """Автокоммит изменений в git репе проекта."""
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            f'cd {PROJECT_DIR} && '
+            'git init -q 2>/dev/null; '
+            'git add -A && '
+            f'git diff --cached --quiet || git commit -q -m "{summary[:100]}"',
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15)
+        output = stdout.decode().strip()
+        if output:
+            await logger.ainfo("Creative: git commit", output=output[:200])
+    except Exception as e:
+        await logger.awarn("Creative: git commit failed", error=str(e))
+
+
 async def _run_and_save(prompt: str, label: str, post_result: bool = True):
     """Запустить creative agent и сохранить результат в self_state."""
     await logger.ainfo(f"Creative: {label}")
@@ -138,6 +160,10 @@ async def _run_and_save(prompt: str, label: str, post_result: bool = True):
             # Отправляем итог в чат (полный output, chat_agent сам сократит)
             if post_result:
                 await _post_to_chat(output)
+
+        # Автокоммит изменений
+        commit_msg = output[:100].strip().replace('"', "'") if output else label
+        await _git_auto_commit(commit_msg)
 
         await logger.ainfo("Creative: сессия завершена", output=output[:500])
     except asyncio.TimeoutError:
