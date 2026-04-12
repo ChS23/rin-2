@@ -2,7 +2,7 @@ from agents import Agent
 
 from src.handlers.checkin import ai_model, REACTIONS
 from src.handlers.chat.tools import all_tools, music_tools
-from src.handlers.creative.tools import analyze_image
+from src.handlers.creative.tools import analyze_image, find_files, grep_files, read_file, move_file
 
 REACTION_NAMES = ", ".join(f'"{k}"' for k in REACTIONS)
 
@@ -120,7 +120,7 @@ async def work_on_chastota(task: str) -> str:
 chat_agent = Agent(
     model=ai_model,
     name="Рин",
-    tools=all_tools + [_music_tool, work_on_chastota, analyze_image],
+    tools=all_tools + [_music_tool, work_on_chastota, analyze_image, find_files, grep_files, read_file, move_file],
     instructions=f"""
     {RIN_LORE}
 
@@ -152,7 +152,11 @@ chat_agent = Agent(
     - edit_file: заменить конкретный фрагмент в уже написанном файле — когда надо поправить одну строку, а не переписывать всё. old_string должен встречаться ровно один раз.
     - read_script: прочитать файл который ты уже писала раньше — чтобы продолжить с нужного места или сверить логику.
     - list_scripts: посмотреть что ты уже написала (список файлов).
-    - send_file: прикрепить уже существующий файл к ответу. Используй когда просят скинуть/переслать файл который ты уже создавала (сначала list_scripts чтобы проверить имя).
+    - find_files: найти файлы по паттерну (*.rpy, **/*.png). Точнее чем list_scripts.
+    - grep_files: найти текст в файлах по regex. Например grep_files("label day1_") найдёт все лейблы дня 1.
+    - read_file: прочитать файл с нумерацией строк. Можно указать offset/limit для больших файлов.
+    - move_file: переместить/переименовать файл.
+    - send_file: прикрепить уже существующий файл к ответу. Используй когда просят скинуть/переслать файл который ты уже создавала.
     - compose_music: сочинить музыку и прикрепить как .ogg — просто опиши настроение/сцену ("грустный арктический дрон", "тревожный эмбиент для второго лупа"). Отдельный агент сам подберёт ноты.
     - generate_image: сгенерировать картинку. ВАЖНО: description пиши ТОЛЬКО НА АНГЛИЙСКОМ как подробный промпт для нейросети Flux. Правила промпта: естественный язык (не теги), 30-80 слов, начинай с субъекта, потом окружение, стиль, освещение. Пример: description="a lonely arctic weather station at night, aurora borealis painting the sky green, warm light from a single window, snow drifts around the building, wide shot, soft ambient glow". Стиль: 'anime' для персонажей, 'digital art' для сцен, 'pixel art' для ретро, 'watercolor' для мягкого, 'photo' для реализма. Если просят ТВОЁ фото/селфи — ставь selfie=true и опиши только обстановку и позу (description="sitting at desk late at night, laptop screen glow on face, tired but focused, messy room with papers", selfie=true, style="anime"). Если генерируешь фон/спрайт для игры — сохраняй в папку проекта через filename: filename="chastota/game/images/bg_station_night.png".
     - work_on_chastota: поработать над Частотой по фидбеку из чата. Используй когда кто-то даёт конкретное предложение по проекту и ты согласна с ним. Передай что именно сделать ("добавить сцену в радиорубке где Марина слышит голос", "поправить диалог Кирилла — слишком формально"). НЕ используй просто так — только если фидбек осмысленный и ты реально хочешь это внести. Займёт пару минут.
