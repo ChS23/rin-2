@@ -265,26 +265,42 @@ async def chat_with_rin(message: Message):
         return
 
     file_path = await rdb.getdel(PENDING_FILE_KEY)
-    attachment = await _upload_doc(message.peer_id, file_path) if file_path else None
+    attachment = None
+    upload_failed = False
+    if file_path:
+        attachment = await _upload_doc(message.peer_id, file_path)
+        if not attachment:
+            upload_failed = True
 
     r = parse_response(result.final_output)
+    if upload_failed:
+        r.text = (r.text or "") + "\n\n(файл не прикрепился — ВК не принял загрузку)"
 
     if not r.text:
         await update_last_seen(message.from_id)
         await logger.ainfo("Рин промолчала", user_id=message.from_id, user_name=user_name, input=text)
         return
 
-    await api.messages.send(
-        peer_id=message.peer_id,
-        message=r.text,
-        attachment=attachment,
-        forward=orjson.dumps({
-            "peer_id": message.peer_id,
-            "conversation_message_ids": [message.conversation_message_id],
-            "is_reply": 1,
-        }).decode(),
-        random_id=random.getrandbits(31),
-    )
+    try:
+        await api.messages.send(
+            peer_id=message.peer_id,
+            message=r.text,
+            attachment=attachment,
+            forward=orjson.dumps({
+                "peer_id": message.peer_id,
+                "conversation_message_ids": [message.conversation_message_id],
+                "is_reply": 1,
+            }).decode(),
+            random_id=random.getrandbits(31),
+        )
+    except Exception:
+        # Если reply не удался — отправляем без reply
+        await api.messages.send(
+            peer_id=message.peer_id,
+            message=r.text,
+            attachment=attachment,
+            random_id=random.getrandbits(31),
+        )
     await record_message(message.peer_id, -GROUP_ID, r.text, resolve_user_name)
 
     if r.reaction and r.reaction in REACTIONS:
