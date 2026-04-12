@@ -45,7 +45,7 @@ MAX_TURNS = 50
 LAST_MSG_KEY = "rin:chat:{peer_id}:last_msg_ts"
 CREATIVE_COOLDOWN_KEY = "rin:creative:last_run"
 MIN_QUIET_MINUTES = 60       # минимум тишины в чате
-CREATIVE_COOLDOWN_HOURS = 3  # минимум между сессиями
+CREATIVE_COOLDOWN_HOURS = 2  # минимум между сессиями
 
 
 def _parse_valkey_ts(raw) -> datetime.datetime | None:
@@ -209,14 +209,19 @@ async def check_creative_trigger():
         await run_forced_session(task)
 
 
-# Расписание: ночью в 1:00 и 3:00 (когда Рин по лору работает)
-@scheduler.scheduled_job(trigger="cron", hour=1, minute=0)
+# Расписание: ночью 0:00, 2:00, 4:00
+@scheduler.scheduled_job(trigger="cron", hour=0, minute=0)
 async def creative_session_night_1():
     await run_creative_session()
 
 
-@scheduler.scheduled_job(trigger="cron", hour=3, minute=0)
+@scheduler.scheduled_job(trigger="cron", hour=2, minute=0)
 async def creative_session_night_2():
+    await run_creative_session()
+
+
+@scheduler.scheduled_job(trigger="cron", hour=4, minute=0)
+async def creative_session_night_3():
     await run_creative_session()
 
 
