@@ -1,5 +1,6 @@
 import asyncio
 import datetime
+import os
 import random
 import re
 from pathlib import Path
@@ -165,7 +166,7 @@ class ChatHistoryMiddleware(BaseMiddleware[Message]):
                 _seen_messages.clear()
 
             text = msg.text or ""
-            att_desc = _extract_attachments(msg)
+            att_desc = await _extract_attachments(msg)
             if att_desc:
                 text = (text + " " + " ".join(att_desc)).strip()
             if text:
@@ -209,7 +210,83 @@ class MentionsBot(ABCRule[Message]):
 #                       ХЕНДЛЕР ЧАТА
 # ═══════════════════════════════════════════════════════════
 
-def _extract_attachments(message: Message) -> list[str]:
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+
+async def _transcribe_audio(url: str) -> str | None:
+    """Транскрибировать аудио через Groq Whisper."""
+    if not GROQ_API_KEY:
+        return None
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                if resp.status != 200:
+                    return None
+                audio_data = await resp.read()
+
+        import io
+        form = aiohttp.FormData()
+        form.add_field("file", io.BytesIO(audio_data), filename="voice.ogg", content_type="audio/ogg")
+        form.add_field("model", "whisper-large-v3-turbo")
+        form.add_field("language", "ru")
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api.groq.com/openai/v1/audio/transcriptions",
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+                data=form,
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data.get("text", "").strip()
+        return None
+    except Exception as e:
+        await logger.awarn("Whisper transcription failed", error=str(e))
+        return None
+
+
+async def _probe_audio(url: str) -> str:
+    """Скачать аудио и получить метаданные через ffprobe."""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                if resp.status != 200:
+                    return "не удалось скачать"
+                data = await resp.read()
+        tmp = Path("/tmp/probe_audio")
+        tmp.write_bytes(data)
+        proc = await asyncio.create_subprocess_exec(
+            "ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", str(tmp),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+        tmp.unlink(missing_ok=True)
+        import json
+        info = json.loads(stdout.decode())
+        fmt = info.get("format", {})
+        duration = float(fmt.get("duration", 0))
+        mins = int(duration) // 60
+        secs = int(duration) % 60
+        bitrate = int(fmt.get("bit_rate", 0)) // 1000
+        codec = ""
+        for s in info.get("streams", []):
+            if s.get("codec_type") == "audio":
+                codec = s.get("codec_name", "")
+                break
+        parts = [f"{mins}:{secs:02d}"]
+        if codec:
+            parts.append(codec)
+        if bitrate:
+            parts.append(f"{bitrate}kbps")
+        size_kb = len(data) // 1024
+        parts.append(f"{size_kb}KB")
+        return ", ".join(parts)
+    except Exception:
+        return "аудиофайл"
+
+
+async def _extract_attachments(message: Message) -> list[str]:
     """Извлечь описания аттачментов из сообщения."""
     if not message.attachments:
         return []
@@ -219,15 +296,50 @@ def _extract_attachments(message: Message) -> list[str]:
             continue
         t = att.type.value
         if t == "photo" and att.photo:
-            # Берём самый большой размер
             sizes = att.photo.sizes or []
             url = max(sizes, key=lambda s: (s.width or 0) * (s.height or 0)).url if sizes else None
             if url:
                 items.append(f"[фото: {url}]")
+        elif t == "video" and att.video:
+            title = att.video.title or "видео"
+            dur = att.video.duration or 0
+            items.append(f"[видео: {title}, {dur}с]")
+        elif t == "audio" and att.audio:
+            artist = att.audio.artist or "?"
+            title = att.audio.title or "?"
+            dur = att.audio.duration or 0
+            mins = dur // 60
+            secs = dur % 60
+            items.append(f"[аудио: {artist} — {title}, {mins}:{secs:02d}]")
         elif t == "doc" and att.doc:
-            items.append(f"[файл: {att.doc.title}, {att.doc.size} байт, url={att.doc.url}]")
+            title = att.doc.title or "файл"
+            ext = title.rsplit(".", 1)[-1].lower() if "." in title else ""
+            if ext in ("ogg", "mp3", "wav", "flac", "opus", "m4a", "aac"):
+                meta = await _probe_audio(att.doc.url)
+                items.append(f"[аудиофайл: {title}, {meta}]")
+            else:
+                items.append(f"[файл: {title}, {att.doc.size} байт, url={att.doc.url}]")
         elif t == "audio_message" and att.audio_message:
-            items.append(f"[голосовое: {att.audio_message.duration}с, url={att.audio_message.link_ogg}]")
+            transcript = await _transcribe_audio(att.audio_message.link_ogg)
+            if transcript:
+                items.append(f'[голосовое ({att.audio_message.duration}с): "{transcript}"]')
+            else:
+                items.append(f"[голосовое: {att.audio_message.duration}с]")
+        elif t == "sticker" and att.sticker:
+            items.append("[стикер]")
+        elif t == "link" and att.link:
+            items.append(f"[ссылка: {att.link.url}]")
+        elif t == "wall" and att.wall:
+            items.append("[репост записи]")
+        elif t == "poll" and att.poll:
+            q = att.poll.question or "опрос"
+            items.append(f"[опрос: {q}]")
+        elif t == "graffiti":
+            items.append("[граффити]")
+        elif t == "story":
+            items.append("[история]")
+        else:
+            items.append(f"[{t}]")
     return items
 
 
@@ -269,7 +381,7 @@ async def chat_with_rin(message: Message):
         prompt_parts.append(f"Инфо о сообществе:\n{community}")
     if context:
         prompt_parts.append(context)
-    attachments = _extract_attachments(message)
+    attachments = await _extract_attachments(message)
     msg = f"{user_name} обращается к тебе: {text}"
     if attachments:
         msg += "\nПрикреплено: " + ", ".join(attachments)
@@ -327,7 +439,12 @@ async def chat_with_rin(message: Message):
             attachment=attachment,
             random_id=random.getrandbits(31),
         )
-    await record_message(message.peer_id, -GROUP_ID, r.text, resolve_user_name)
+    history_text = r.text
+    if file_path:
+        history_text += f" [файл: {file_path}]"
+    if attachment:
+        history_text += f" [vk: {attachment}]"
+    await record_message(message.peer_id, -GROUP_ID, history_text, resolve_user_name)
 
     if r.reaction and r.reaction in REACTIONS:
         try:

@@ -8,6 +8,7 @@ services:
       - .env
     environment:
       - REDIS_URL=redis://valkey:6379
+      - TZ=Europe/Moscow
     volumes:
       - bot_data:/app/data
     depends_on:
