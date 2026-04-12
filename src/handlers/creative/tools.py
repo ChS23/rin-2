@@ -410,21 +410,6 @@ async def _renpy_compile_impl() -> str:
         return f"Ошибка компиляции: {e}"
 
 
-def _read_roadmap_impl() -> str:
-    if not ROADMAP_PATH.exists():
-        return "Роадмап ещё не создан"
-    content = ROADMAP_PATH.read_text(encoding="utf-8")
-    if len(content) > 4000:
-        content = content[:4000] + "\n\n[...обрезано]"
-    return content
-
-
-def _update_roadmap_impl(content: str) -> str:
-    ROADMAP_PATH.parent.mkdir(parents=True, exist_ok=True)
-    ROADMAP_PATH.write_text(content, encoding="utf-8")
-    return "Роадмап обновлён"
-
-
 async def _renpy_web_build_impl() -> str:
     if not GAME_DIR.exists():
         return "Папка game/ не существует"
@@ -460,18 +445,6 @@ async def renpy_compile() -> str:
 
 
 @function_tool
-def read_roadmap() -> str:
-    """Прочитать текущий роадмап проекта — что сделано, что дальше."""
-    return _read_roadmap_impl()
-
-
-@function_tool
-def update_roadmap(content: str) -> str:
-    """Обновить роадмап проекта. content — полное содержимое файла ROADMAP.md."""
-    return _update_roadmap_impl(content)
-
-
-@function_tool
 async def renpy_web_build() -> str:
     """Собрать веб-версию игры (HTML+WASM). Результат в папке chastota_web/."""
     return await _renpy_web_build_impl()
@@ -493,8 +466,6 @@ creative_tools = [
     analyze_image,
     # Ассеты
     create_image,
-    # Роадмап
-    read_roadmap, update_roadmap,
     # Ren'Py
     renpy_lint, renpy_compile, renpy_web_build,
 ]

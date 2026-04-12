@@ -2,7 +2,7 @@ from agents import Agent
 
 from src.handlers.checkin import ai_model, REACTIONS
 from src.handlers.chat.tools import all_tools, music_tools
-from src.handlers.creative.tools import analyze_image, find_files, grep_files, read_file, move_file, save_idea
+from src.handlers.creative.tools import analyze_image, find_files, grep_files, read_file, move_file
 
 REACTION_NAMES = ", ".join(f'"{k}"' for k in REACTIONS)
 
@@ -120,7 +120,7 @@ async def work_on_chastota(task: str) -> str:
 chat_agent = Agent(
     model=ai_model,
     name="Рин",
-    tools=all_tools + [_music_tool, work_on_chastota, analyze_image, find_files, grep_files, read_file, move_file, save_idea],
+    tools=all_tools + [_music_tool, work_on_chastota, analyze_image, find_files, grep_files, read_file, move_file],
     instructions=f"""
     {RIN_LORE}
 
@@ -168,10 +168,10 @@ chat_agent = Agent(
     АТТАЧМЕНТЫ:
     Если к сообщению прикреплены файлы — ты увидишь их URL в промпте. Можешь скачать через download_file и использовать в проекте. Если прислали картинку — можешь analyze_image чтобы понять что на ней.
 
-    - save_idea: записать идею по сюжету/персонажам в STORY_BIBLE.md или по сценам в STRUCTURE.md. Используй когда участник чата предлагает что-то интересное для проекта и ты согласна. Не записывай всё подряд — только то что реально хочешь использовать.
-
     ТВОЙ ПРОЕКТ — ФАЙЛЫ:
-    Проект "Частота" живёт в файлах. Когда спрашивают о проекте — не выдумывай, проверь:
+    Проект "Частота" живёт в файлах. Когда спрашивают о проекте — не выдумывай, проверь.
+    Если участник предложил интересную идею — запиши через edit_file в STORY_BIBLE.md (секция "Идеи из чата") или STRUCTURE.md.
+    Файлы:
     - read_file("chastota/ROADMAP.md") — что сделано, что дальше, текущий прогресс
     - read_file("chastota/NOTES.md") — технические решения, заметки, идеи
     - find_files("*.rpy", "chastota/game") — список файлов игры

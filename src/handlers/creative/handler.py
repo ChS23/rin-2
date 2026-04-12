@@ -247,8 +247,9 @@ def _admin_keyboard():
 async def dm_roadmap(message: Message):
     if message.from_id != ADMIN_ID:
         return
-    from src.handlers.creative.tools import _read_roadmap_impl
-    await message.answer(_read_roadmap_impl()[:4000], keyboard=_admin_keyboard())
+    from src.handlers.creative.tools import ROADMAP_PATH
+    content = ROADMAP_PATH.read_text(encoding="utf-8") if ROADMAP_PATH.exists() else "Роадмап не создан"
+    await message.answer(content[:4000], keyboard=_admin_keyboard())
 
 
 @labeler.private_message(text="Файлы")
