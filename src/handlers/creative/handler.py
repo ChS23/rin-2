@@ -296,12 +296,44 @@ async def dm_status(message: Message):
     await message.answer("\n".join(parts), keyboard=_admin_keyboard())
 
 
+@labeler.private_message(text="Сообщение <idea>")
+async def dm_post_message(message: Message, idea: str):
+    """Отправить сообщение в чат от лица Рин. idea — смысл, Рин перефразирует."""
+    if message.from_id != ADMIN_ID:
+        return
+    try:
+        from src.handlers.chat.agents import chat_agent
+        from src.handlers.chat.tools import PENDING_FILE_KEY
+
+        prompt = f"Напиши в чат сообщение со следующим смыслом (1-3 предложения, своими словами): {idea}"
+        async with ai_lock:
+            await rdb.delete(PENDING_FILE_KEY)
+            result = await asyncio.wait_for(Runner.run(chat_agent, prompt), timeout=60)
+            await rdb.delete(PENDING_FILE_KEY)
+
+        from src.handlers.chat.utils import parse_response
+        r = parse_response(result.final_output)
+        if not r.text:
+            await message.answer("Рин не ответила", keyboard=_admin_keyboard())
+            return
+
+        await api.messages.send(
+            peer_ids=[CHAT_PEER_ID],
+            message=r.text,
+            random_id=random.getrandbits(31),
+        )
+        await record_message(CHAT_PEER_ID, -GROUP_ID, r.text, resolve_user_name)
+        await message.answer(f"Отправлено: {r.text[:200]}", keyboard=_admin_keyboard())
+    except Exception as e:
+        await message.answer(f"Ошибка: {e}", keyboard=_admin_keyboard())
+
+
 @labeler.private_message()
 async def dm_default(message: Message):
     """Показать клавиатуру для незнакомых сообщений."""
     if message.from_id != ADMIN_ID:
         return
     await message.answer(
-        'Используй кнопки или напиши "Задача <описание>" для кастомной задачи.',
+        'Команды:\n"Задача <описание>" — creative сессия\n"Сообщение <смысл>" — Рин напишет в чат',
         keyboard=_admin_keyboard(),
     )
