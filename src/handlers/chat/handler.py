@@ -185,6 +185,28 @@ class MentionsBot(ABCRule[Message]):
 #                       ХЕНДЛЕР ЧАТА
 # ═══════════════════════════════════════════════════════════
 
+def _extract_attachments(message: Message) -> list[str]:
+    """Извлечь описания аттачментов из сообщения."""
+    if not message.attachments:
+        return []
+    items = []
+    for att in message.attachments:
+        if not att.type:
+            continue
+        t = att.type.value
+        if t == "photo" and att.photo:
+            # Берём самый большой размер
+            sizes = att.photo.sizes or []
+            url = max(sizes, key=lambda s: (s.width or 0) * (s.height or 0)).url if sizes else None
+            if url:
+                items.append(f"[фото: {url}]")
+        elif t == "doc" and att.doc:
+            items.append(f"[файл: {att.doc.title}, {att.doc.size} байт, url={att.doc.url}]")
+        elif t == "audio_message" and att.audio_message:
+            items.append(f"[голосовое: {att.audio_message.duration}с, url={att.audio_message.link_ogg}]")
+    return items
+
+
 @labeler.chat_message(MentionsBot())
 async def chat_with_rin(message: Message):
     text = message.text or ""
@@ -223,7 +245,11 @@ async def chat_with_rin(message: Message):
         prompt_parts.append(f"Инфо о сообществе:\n{community}")
     if context:
         prompt_parts.append(context)
-    prompt_parts.append(f"{user_name} обращается к тебе: {text}")
+    attachments = _extract_attachments(message)
+    msg = f"{user_name} обращается к тебе: {text}"
+    if attachments:
+        msg += "\nПрикреплено: " + ", ".join(attachments)
+    prompt_parts.append(msg)
 
     prompt = "\n\n".join(prompt_parts)
 
