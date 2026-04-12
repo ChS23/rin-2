@@ -209,20 +209,20 @@ async def check_creative_trigger():
         await run_forced_session(task)
 
 
-# Расписание: ночью 0:00, 2:00, 4:00
+# Расписание: ночью 0:00, 2:00, 4:00 — без проверок, просто работаем
 @scheduler.scheduled_job(trigger="cron", hour=0, minute=0)
 async def creative_session_night_1():
-    await run_creative_session()
+    await run_forced_session()
 
 
 @scheduler.scheduled_job(trigger="cron", hour=2, minute=0)
 async def creative_session_night_2():
-    await run_creative_session()
+    await run_forced_session()
 
 
 @scheduler.scheduled_job(trigger="cron", hour=4, minute=0)
 async def creative_session_night_3():
-    await run_creative_session()
+    await run_forced_session()
 
 
 # ═══════════════════════════════════════════════════════════
