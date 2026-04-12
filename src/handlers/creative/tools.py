@@ -1,4 +1,5 @@
 import asyncio
+import re
 import urllib.parse
 
 import aiofiles
@@ -8,7 +9,6 @@ from agents import function_tool
 
 from src.handlers.chat.tools import (
     SCRIPTS_DIR, _safe_path,
-    edit_file, read_script, list_scripts,
     compose_midi, POLLINATIONS_URL,
 )
 
@@ -20,14 +20,43 @@ GAME_DIR = PROJECT_DIR / "game"
 ROADMAP_PATH = PROJECT_DIR / "ROADMAP.md"
 WEB_BUILD_DIR = SCRIPTS_DIR / "chastota_web"
 
+ALLOWED_WRITE_EXTS = {".rpy", ".py", ".txt", ".md", ".cfg", ".json"}
 
-ALLOWED_WRITE_EXTS = {".rpy", ".py", ".txt", ".md", ".cfg"}
+
+# ═══════════════════════════════════════════════════════════
+#                    ФАЙЛОВЫЕ ИНСТРУМЕНТЫ
+# ═══════════════════════════════════════════════════════════
+
+@function_tool
+async def read_file(filename: str, offset: int = 0, limit: int = 200) -> str:
+    """Прочитать файл проекта.
+    filename — путь относительно папки скриптов, например 'chastota/game/script.rpy'.
+    offset — с какой строки начать (0 = сначала).
+    limit — сколько строк читать (по умолчанию 200). Для больших файлов читай частями."""
+    try:
+        file_path = _safe_path(filename)
+    except ValueError:
+        return "Недопустимый путь файла"
+    if not file_path.exists():
+        return f"Файл {filename} не найден"
+    try:
+        async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
+            content = await f.read()
+        lines = content.splitlines()
+        total = len(lines)
+        chunk = lines[offset:offset + limit]
+        result = "\n".join(f"{offset + i + 1}: {l}" for i, l in enumerate(chunk))
+        if offset + limit < total:
+            result += f"\n\n[показано {len(chunk)} из {total} строк, offset={offset}]"
+        return result
+    except Exception as e:
+        return f"Ошибка чтения: {e}"
 
 
 @function_tool
 async def write_file(filename: str, content: str) -> str:
-    """Записать файл в проект.
-    filename — путь относительно папки скриптов, например 'chastota/game/script.rpy' или 'chastota/ROADMAP.md'.
+    """Записать файл в проект (создаёт или перезаписывает).
+    filename — путь относительно папки скриптов, например 'chastota/game/script.rpy'.
     content — полное содержимое файла."""
     try:
         file_path = _safe_path(filename)
@@ -45,8 +74,133 @@ async def write_file(filename: str, content: str) -> str:
 
 
 @function_tool
+async def edit_file(filename: str, old_string: str, new_string: str) -> str:
+    """Заменить фрагмент в файле. old_string должен встречаться ровно один раз.
+    filename — путь относительно папки скриптов.
+    old_string — точный текст для замены.
+    new_string — на что заменить."""
+    try:
+        file_path = _safe_path(filename)
+    except ValueError:
+        return "Недопустимый путь файла"
+    if not file_path.exists():
+        return f"Файл {filename} не найден"
+    try:
+        async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
+            content = await f.read()
+        count = content.count(old_string)
+        if count == 0:
+            return "Фрагмент не найден в файле"
+        if count > 1:
+            return f"Фрагмент встречается {count} раз — уточни контекст"
+        new_content = content.replace(old_string, new_string, 1)
+        async with aiofiles.open(file_path, "w", encoding="utf-8") as f:
+            await f.write(new_content)
+        lines = new_content.splitlines()
+        insert_line = new_content[: new_content.index(new_string)].count("\n")
+        start = max(0, insert_line - 2)
+        end = min(len(lines), insert_line + new_string.count("\n") + 3)
+        snippet = "\n".join(f"{start + i + 1}: {l}" for i, l in enumerate(lines[start:end]))
+        await logger.ainfo("Creative: файл отредактирован", filename=filename)
+        return f"Готово:\n{snippet}"
+    except Exception as e:
+        return f"Ошибка: {e}"
+
+
+@function_tool
+def find_files(pattern: str = "*.rpy", path: str = "chastota") -> str:
+    """Найти файлы по glob-паттерну.
+    pattern — паттерн (*.rpy, **/*.png, *.ogg). По умолчанию *.rpy.
+    path — директория для поиска относительно скриптов. По умолчанию 'chastota'."""
+    try:
+        search_dir = _safe_path(path) if path else SCRIPTS_DIR
+    except ValueError:
+        return "Недопустимый путь"
+    if not search_dir.exists():
+        return f"Директория {path} не найдена"
+    files = sorted(search_dir.rglob(pattern))
+    files = [f for f in files if f.is_file()]
+    if not files:
+        return f"Файлы по паттерну '{pattern}' не найдены"
+    lines = []
+    for f in files:
+        rel = f.relative_to(SCRIPTS_DIR)
+        size = f.stat().st_size
+        lines.append(f"{rel} ({size} б)")
+    return "\n".join(lines)
+
+
+@function_tool
+def grep_files(pattern: str, path: str = "chastota", glob: str = "*.rpy") -> str:
+    """Поиск текста по содержимому файлов (regex).
+    pattern — что искать (regex), например 'label day1_' или 'define.*Character'.
+    path — директория для поиска. По умолчанию 'chastota'.
+    glob — фильтр файлов. По умолчанию '*.rpy'."""
+    try:
+        search_dir = _safe_path(path) if path else SCRIPTS_DIR
+    except ValueError:
+        return "Недопустимый путь"
+    if not search_dir.exists():
+        return f"Директория {path} не найдена"
+    try:
+        regex = re.compile(pattern)
+    except re.error as e:
+        return f"Невалидный regex: {e}"
+    results = []
+    for f in sorted(search_dir.rglob(glob)):
+        if not f.is_file():
+            continue
+        try:
+            text = f.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        for i, line in enumerate(text.splitlines(), 1):
+            if regex.search(line):
+                rel = f.relative_to(SCRIPTS_DIR)
+                results.append(f"{rel}:{i}: {line.strip()}")
+                if len(results) >= 50:
+                    results.append("[...обрезано, >50 совпадений]")
+                    return "\n".join(results)
+    return "\n".join(results) if results else "Совпадений не найдено"
+
+
+@function_tool
+def delete_file(filename: str) -> str:
+    """Удалить файл из проекта.
+    filename — путь относительно папки скриптов."""
+    try:
+        file_path = _safe_path(filename)
+    except ValueError:
+        return "Недопустимый путь файла"
+    if not file_path.exists():
+        return f"Файл {filename} не найден"
+    file_path.unlink()
+    return f"Файл {filename} удалён"
+
+
+@function_tool
+def move_file(src: str, dst: str) -> str:
+    """Переместить/переименовать файл.
+    src — текущий путь. dst — новый путь. Оба относительно папки скриптов."""
+    try:
+        src_path = _safe_path(src)
+        dst_path = _safe_path(dst)
+    except ValueError:
+        return "Недопустимый путь"
+    if not src_path.exists():
+        return f"Файл {src} не найден"
+    dst_path.parent.mkdir(parents=True, exist_ok=True)
+    src_path.rename(dst_path)
+    return f"Перемещён: {src} → {dst}"
+
+
+# ═══════════════════════════════════════════════════════════
+#                    ГЕНЕРАЦИЯ АССЕТОВ
+# ═══════════════════════════════════════════════════════════
+
+@function_tool
 async def create_image(description: str, style: str = "digital art", filename: str = "") -> str:
-    """Сгенерировать картинку для игры и сохранить в проект (НЕ прикрепляется к VK).
+    """Сгенерировать картинку для игры и сохранить в проект.
     description — описание НА АНГЛИЙСКОМ, 30-80 слов.
     style — стиль: 'digital art', 'anime', 'watercolor', 'photo', 'pixel art'.
     filename — путь, например 'chastota/game/images/bg_station_night.png'. Обязателен."""
@@ -84,6 +238,10 @@ async def create_image(description: str, style: str = "digital art", filename: s
     except Exception as e:
         return f"Ошибка: {e}"
 
+
+# ═══════════════════════════════════════════════════════════
+#                    REN'PY ИНСТРУМЕНТЫ
+# ═══════════════════════════════════════════════════════════
 
 async def _renpy_lint_impl() -> str:
     if not GAME_DIR.exists():
@@ -164,7 +322,6 @@ async def _renpy_web_build_impl() -> str:
         return f"Ошибка: {e}"
 
 
-# Tool-обёртки для agent SDK
 @function_tool
 async def renpy_lint() -> str:
     """Запустить проверку (lint) Ren'Py проекта. Покажет ошибки синтаксиса, битые ссылки, недостающие файлы."""
@@ -195,11 +352,20 @@ async def renpy_web_build() -> str:
     return await _renpy_web_build_impl()
 
 
-# Все инструменты для creative agent
+# ═══════════════════════════════════════════════════════════
+#                    ЭКСПОРТ
+# ═══════════════════════════════════════════════════════════
+
 creative_tools = [
-    write_file, edit_file, read_script, list_scripts,
+    # Файлы
+    read_file, write_file, edit_file,
+    find_files, grep_files,
+    delete_file, move_file,
+    # Ассеты
     create_image,
+    # Роадмап
     read_roadmap, update_roadmap,
+    # Ren'Py
     renpy_lint, renpy_compile, renpy_web_build,
 ]
 
