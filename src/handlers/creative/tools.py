@@ -193,25 +193,24 @@ def delete_file(filename: str) -> str:
 
 
 @function_tool
-def save_idea(idea: str, section: str = "bible") -> str:
+async def save_idea(idea: str, section: str = "bible") -> str:
     """Записать идею в документы проекта.
     idea — текст идеи.
     section — куда: 'bible' (STORY_BIBLE, идеи по сюжету/персонажам) или 'structure' (STRUCTURE, идеи по сценам/ветвлениям)."""
     import datetime as _dt
     date = _dt.datetime.now().strftime("%d.%m.%Y")
     entry = f"\n- [{date}] {idea}"
-    if section == "structure":
-        path = STRUCTURE_PATH
-    else:
-        path = STORY_BIBLE_PATH
+    path = STRUCTURE_PATH if section == "structure" else STORY_BIBLE_PATH
     if not path.exists():
         return f"Файл {path.name} не найден"
-    content = path.read_text(encoding="utf-8")
+    async with aiofiles.open(path, "r", encoding="utf-8") as f:
+        content = await f.read()
     if "## Идеи из чата" in content:
         content = content.replace("## Идеи из чата", f"## Идеи из чата{entry}", 1)
     else:
         content += f"\n\n## Идеи из чата{entry}"
-    path.write_text(content, encoding="utf-8")
+    async with aiofiles.open(path, "w", encoding="utf-8") as f:
+        await f.write(content)
     return f"Идея записана в {path.name}"
 
 
