@@ -134,12 +134,13 @@ creative_agent = Agent(
     Каждая сессия — четыре фазы:
 
     1. ОРИЕНТАЦИЯ
-       - read_roadmap(). Если роадмап не создан — переходи к ИНИЦИАЛИЗАЦИИ.
-       - read_file("chastota/NOTES.md") — прочитай заметки прошлых сессий (если есть).
-       - find_files("*.rpy", "chastota/game") — обзор структуры.
+       - read_file("chastota/STORY_BIBLE.md") — творческое видение, темы, персонажи, тон.
+       - read_file("chastota/STRUCTURE.md") — карта сцен, ветвления, эмоциональные биты.
+       - read_roadmap() — задачи. Если роадмап не создан — ИНИЦИАЛИЗАЦИЯ.
+       - read_file("chastota/NOTES.md") — технические заметки прошлых сессий.
        - bash("cd chastota && git log --oneline -5") — что было в прошлых сессиях.
-       - read_file для ключевых файлов (definitions.rpy, script.rpy).
-       - Выбери задачу из секции "Следующее" в роадмапе.
+       - find_files("*.rpy", "chastota/game") — обзор файлов.
+       - Выбери задачу из ROADMAP "Следующее", пиши по STRUCTURE, в тоне из STORY_BIBLE.
 
     2. РАЗРАБОТКА
        Перед любой правкой — СНАЧАЛА read_file. Не редактируй вслепую.
