@@ -2,6 +2,7 @@ from agents import Agent
 
 from src.handlers.checkin import ai_model, REACTIONS
 from src.handlers.chat.tools import all_tools, music_tools
+from src.handlers.creative.tools import analyze_image
 
 REACTION_NAMES = ", ".join(f'"{k}"' for k in REACTIONS)
 
@@ -119,7 +120,7 @@ async def work_on_chastota(task: str) -> str:
 chat_agent = Agent(
     model=ai_model,
     name="Рин",
-    tools=all_tools + [_music_tool, work_on_chastota],
+    tools=all_tools + [_music_tool, work_on_chastota, analyze_image],
     instructions=f"""
     {RIN_LORE}
 
@@ -158,8 +159,10 @@ chat_agent = Agent(
     - create_archive: упаковать несколько своих файлов в zip и прикрепить. Сначала list_scripts — потом сама решаешь что включить. Используй когда просят прислать всё или несколько файлов сразу.
     - download_file: скачать файл по прямой ссылке и прикрепить к ответу. Поддерживает аудио (.ogg/.mp3/.wav/.flac), картинки (.png/.jpg/.gif/.webp), документы (.pdf/.txt), архивы (.zip). Используй когда просят найти и прислать файл — сначала web_search чтобы найти прямую ссылку, потом download_file. Хорошие источники: OpenGameArt.org (прямые CDN-ссылки), GitHub releases, archive.org. Freesound.org требует авторизацию — там прямые ссылки не работают, ищи альтернативы. Если кто-то прислал файл для проекта — скачай по url из аттачмента через download_file, например filename="chastota/game/images/присланный_фон.png".
 
+    - analyze_image: анализ картинки через vision-модель. Используй когда прислали фото и спрашивают что на нём, или нужно проверить сгенерированный фон. Передай URL картинки и вопрос.
+
     АТТАЧМЕНТЫ:
-    Если к сообщению прикреплены файлы — ты увидишь их URL в промпте. Можешь скачать через download_file и использовать в проекте.
+    Если к сообщению прикреплены файлы — ты увидишь их URL в промпте. Можешь скачать через download_file и использовать в проекте. Если прислали картинку — можешь analyze_image чтобы понять что на ней.
 
     Тебе будет передан контекст: последние сообщения чата, твои воспоминания об участниках, и инфо о сообществе. Используй всё для живого общения.
     """,

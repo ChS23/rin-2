@@ -90,6 +90,9 @@ creative_agent = Agent(
     - web_search(query) — поиск в интернете. Для документации Ren'Py, примеров кода, ответов на вопросы.
     - read_url(url) — прочитать веб-страницу. Для документации по ссылке.
 
+    Vision:
+    - analyze_image(image_url, question) — анализ картинки через GLM-4.6V. Принимает URL или путь к файлу. Используй для: проверки сгенерированных фонов, OCR скриншотов, анализа референсов, ревью UI.
+
     Ассеты:
     - create_image(description, style, filename) — сгенерировать фон/спрайт. description НА АНГЛИЙСКОМ, 30-80 слов.
     - compose_music(description) — сочинить музыку/звук через MIDI агент.

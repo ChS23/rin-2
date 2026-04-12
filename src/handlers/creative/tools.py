@@ -234,6 +234,66 @@ async def bash(command: str, timeout: int = 30) -> str:
 
 
 # ═══════════════════════════════════════════════════════════
+#                    VISION (GLM-4.6V)
+# ═══════════════════════════════════════════════════════════
+
+import os
+from openai import AsyncOpenAI
+
+_vision_client = AsyncOpenAI(
+    api_key=os.getenv("AI_API_KEY"),
+    base_url=os.getenv("AI_BASE_URL"),
+)
+VISION_MODEL = "glm-4.6v"
+
+
+@function_tool
+async def analyze_image(image_url: str, question: str = "Опиши что на картинке") -> str:
+    """Анализ изображения через vision-модель.
+    image_url — URL картинки или путь к локальному файлу (будет прочитан как base64).
+    question — что спросить про картинку. Примеры:
+      'Опиши что на картинке' — общий анализ
+      'Прочитай текст на скриншоте' — OCR
+      'Что за ошибка на скриншоте?' — диагностика
+      'Опиши архитектуру на диаграмме' — анализ схем
+      'Сравни с оригинальным дизайном' — UI ревью"""
+    import base64
+
+    content = [{"type": "text", "text": question}]
+
+    # Если это локальный файл — читаем как base64
+    if not image_url.startswith("http"):
+        try:
+            file_path = _safe_path(image_url)
+            if not file_path.exists():
+                return f"Файл {image_url} не найден"
+            with open(file_path, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode()
+            ext = file_path.suffix.lower().strip(".")
+            if ext == "jpg":
+                ext = "jpeg"
+            data_url = f"data:image/{ext};base64,{b64}"
+            content.append({"type": "image_url", "image_url": {"url": data_url}})
+        except Exception as e:
+            return f"Ошибка чтения файла: {e}"
+    else:
+        content.append({"type": "image_url", "image_url": {"url": image_url}})
+
+    try:
+        resp = await _vision_client.chat.completions.create(
+            model=VISION_MODEL,
+            messages=[{"role": "user", "content": content}],
+            max_tokens=1000,
+        )
+        result = resp.choices[0].message.content or ""
+        if len(result) > 3000:
+            result = result[:3000] + "\n\n[...обрезано]"
+        return result
+    except Exception as e:
+        return f"Ошибка vision: {e}"
+
+
+# ═══════════════════════════════════════════════════════════
 #                    ГЕНЕРАЦИЯ АССЕТОВ
 # ═══════════════════════════════════════════════════════════
 
@@ -403,6 +463,8 @@ creative_tools = [
     bash,
     # Веб
     web_search, read_url,
+    # Vision
+    analyze_image,
     # Ассеты
     create_image,
     # Роадмап
