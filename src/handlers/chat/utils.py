@@ -95,6 +95,16 @@ def parse_response(raw) -> RinResponse:
             reaction=reaction_match.group(1) if reaction_match else None,
         )
 
+    # Фоллбек: "text":текст без кавычек (GLM иногда забывает кавычки)
+    unquoted = re.search(r'"text"\s*:\s*([^"{\[].+?)(?:,\s*"reaction"|,\s*"remember"|,\s*"forget"|,\s*"self_update"|\s*\})', raw, re.DOTALL)
+    if unquoted:
+        text = unquoted.group(1).strip().strip('"').strip()
+        reaction_match = re.search(r'"reaction"\s*:\s*"([^"]+)"', raw)
+        return RinResponse(
+            text=text,
+            reaction=reaction_match.group(1) if reaction_match else None,
+        )
+
     clean = re.sub(r'\{[^{}]*"text"\s*:.*\}\s*$', '', raw, flags=re.DOTALL).strip()
     return RinResponse(text=clean or raw)
 
