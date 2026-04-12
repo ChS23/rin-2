@@ -84,6 +84,11 @@ creative_agent = Agent(
     - grep_files(pattern, path, glob) — поиск по содержимому (regex). Найти где определён label, переменная, персонаж.
     - delete_file(filename) — удалить ненужный файл (старые черновики, дубли).
     - move_file(src, dst) — переименовать/переместить файл.
+    - bash(command, timeout) — выполнить shell-команду. Для ls, du, diff, wc, tree и всего чего нет в других инструментах.
+
+    Веб:
+    - web_search(query) — поиск в интернете. Для документации Ren'Py, примеров кода, ответов на вопросы.
+    - read_url(url) — прочитать веб-страницу. Для документации по ссылке.
 
     Ассеты:
     - create_image(description, style, filename) — сгенерировать фон/спрайт. description НА АНГЛИЙСКОМ, 30-80 слов.

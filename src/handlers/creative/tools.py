@@ -10,6 +10,7 @@ from agents import function_tool
 from src.handlers.chat.tools import (
     SCRIPTS_DIR, _safe_path,
     compose_midi, POLLINATIONS_URL,
+    web_search, read_url,
 )
 
 logger = structlog.get_logger("creative.tools")
@@ -131,19 +132,22 @@ def find_files(pattern: str = "*.rpy", path: str = "chastota") -> str:
 
 
 @function_tool
-def grep_files(pattern: str, path: str = "chastota", glob: str = "*.rpy") -> str:
+def grep_files(pattern: str, path: str = "chastota", glob: str = "*.rpy", context: int = 0, ignore_case: bool = False) -> str:
     """Поиск текста по содержимому файлов (regex).
     pattern — что искать (regex), например 'label day1_' или 'define.*Character'.
     path — директория для поиска. По умолчанию 'chastota'.
-    glob — фильтр файлов. По умолчанию '*.rpy'."""
+    glob — фильтр файлов. По умолчанию '*.rpy'.
+    context — сколько строк вокруг совпадения показать (0 = только совпавшую строку).
+    ignore_case — игнорировать регистр."""
     try:
         search_dir = _safe_path(path) if path else SCRIPTS_DIR
     except ValueError:
         return "Недопустимый путь"
     if not search_dir.exists():
         return f"Директория {path} не найдена"
+    flags = re.IGNORECASE if ignore_case else 0
     try:
-        regex = re.compile(pattern)
+        regex = re.compile(pattern, flags)
     except re.error as e:
         return f"Невалидный regex: {e}"
     results = []
@@ -154,10 +158,17 @@ def grep_files(pattern: str, path: str = "chastota", glob: str = "*.rpy") -> str
             text = f.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
-        for i, line in enumerate(text.splitlines(), 1):
+        lines = text.splitlines()
+        for i, line in enumerate(lines):
             if regex.search(line):
                 rel = f.relative_to(SCRIPTS_DIR)
-                results.append(f"{rel}:{i}: {line.strip()}")
+                if context > 0:
+                    start = max(0, i - context)
+                    end = min(len(lines), i + context + 1)
+                    block = "\n".join(f"  {start+j+1}: {lines[start+j]}" for j in range(end - start))
+                    results.append(f"{rel}:{i+1}:\n{block}")
+                else:
+                    results.append(f"{rel}:{i+1}: {line.strip()}")
                 if len(results) >= 50:
                     results.append("[...обрезано, >50 совпадений]")
                     return "\n".join(results)
@@ -192,6 +203,34 @@ def move_file(src: str, dst: str) -> str:
     dst_path.parent.mkdir(parents=True, exist_ok=True)
     src_path.rename(dst_path)
     return f"Перемещён: {src} → {dst}"
+
+
+@function_tool
+async def bash(command: str, timeout: int = 30) -> str:
+    """Выполнить shell-команду в контейнере. Рабочая директория: /app/data/scripts.
+    command — команда для выполнения.
+    timeout — таймаут в секундах (по умолчанию 30, максимум 120).
+    Используй для: ls, du, wc, diff, head, tail, cp, chmod, tree, и любых команд которых нет в других инструментах.
+    Не используй для: редактирования файлов (есть edit_file), поиска (есть grep_files/find_files)."""
+    timeout = max(5, min(120, timeout))
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=str(SCRIPTS_DIR),
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        output = stdout.decode()
+        if stderr:
+            output += "\nSTDERR: " + stderr.decode()
+        if len(output) > 3000:
+            output = output[:3000] + "\n\n[...обрезано]"
+        return output or "(пустой вывод)"
+    except asyncio.TimeoutError:
+        return "Таймаут (>30с)"
+    except Exception as e:
+        return f"Ошибка: {e}"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -361,6 +400,9 @@ creative_tools = [
     read_file, write_file, edit_file,
     find_files, grep_files,
     delete_file, move_file,
+    bash,
+    # Веб
+    web_search, read_url,
     # Ассеты
     create_image,
     # Роадмап
