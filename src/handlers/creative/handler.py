@@ -40,7 +40,7 @@ class CreativeLoggingHooks(RunHooks):
 
 _hooks = CreativeLoggingHooks()
 _run_config = RunConfig(tracing_disabled=True)
-MAX_TURNS = 50
+MAX_TURNS = 100
 
 LAST_MSG_KEY = "rin:chat:{peer_id}:last_msg_ts"
 CREATIVE_COOLDOWN_KEY = "rin:creative:last_run"
@@ -86,6 +86,27 @@ async def _build_prompt(extra: str = "") -> str:
 
 GROUP_ID = 204871130
 
+from src.handlers.creative.tools import PROJECT_DIR  # noqa: E402
+
+
+async def _git_auto_commit(summary: str):
+    """Автокоммит изменений в git репе проекта."""
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            f'cd {PROJECT_DIR} && '
+            'git init -q 2>/dev/null; '
+            'git add -A && '
+            f'git diff --cached --quiet || git commit -q -m "{summary[:100]}"',
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15)
+        output = stdout.decode().strip()
+        if output:
+            await logger.ainfo("Creative: git commit", output=output[:200])
+    except Exception as e:
+        await logger.awarn("Creative: git commit failed", error=str(e))
+
 
 async def _post_to_chat(raw_output: str):
     """Перефразировать результат через основного агента Рин и отправить в чат."""
@@ -118,25 +139,6 @@ async def _post_to_chat(raw_output: str):
 from src.handlers.creative.tools import PROJECT_DIR  # noqa: E402
 
 
-async def _git_auto_commit(summary: str):
-    """Автокоммит изменений в git репе проекта."""
-    try:
-        proc = await asyncio.create_subprocess_shell(
-            f'cd {PROJECT_DIR} && '
-            'git init -q 2>/dev/null; '
-            'git add -A && '
-            f'git diff --cached --quiet || git commit -q -m "{summary[:100]}"',
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15)
-        output = stdout.decode().strip()
-        if output:
-            await logger.ainfo("Creative: git commit", output=output[:200])
-    except Exception as e:
-        await logger.awarn("Creative: git commit failed", error=str(e))
-
-
 async def _run_and_save(prompt: str, label: str, post_result: bool = True):
     """Запустить creative agent и сохранить результат в self_state."""
     await logger.ainfo(f"Creative: {label}")
@@ -144,7 +146,7 @@ async def _run_and_save(prompt: str, label: str, post_result: bool = True):
         async with ai_lock:
             result = await asyncio.wait_for(
                 Runner.run(creative_agent, prompt, run_config=_run_config, hooks=_hooks, max_turns=MAX_TURNS),
-                timeout=900,
+                timeout=1800,
             )
 
         output = result.final_output or ""
