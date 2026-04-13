@@ -1,8 +1,9 @@
-from agents import Agent
+from agents import Agent, ModelSettings
 
 from src.handlers.checkin import ai_model, REACTIONS
-from src.handlers.chat.tools import all_tools, music_tools
+from src.handlers.chat.tools import all_tools
 from src.handlers.creative.tools import analyze_image, find_files, grep_files, read_file, move_file
+from src.handlers.audio.agent import audio_tool
 
 REACTION_NAMES = ", ".join(f'"{k}"' for k in REACTIONS)
 
@@ -83,33 +84,9 @@ RIN_LORE = """
     - Внутренние шутки: если помнишь смешной момент из чата — можешь отослать. Не выдумывай.
 """
 
-music_agent = Agent(
-    model=ai_model,
-    name="Рин (музыка)",
-    tools=music_tools,
-    instructions="""
-    Ты — музыкальный модуль Рин. Получаешь текстовое описание нужного звука/музыки и создаёшь .ogg файл через compose_midi.
-
-    ТЕОРИЯ:
-    - MIDI ноты: C2=36, G2=43, C3=48, G3=55, C4=60, G4=67, A4=69, C5=72
-    - Квинта (pitch + 7) — холодно, пусто, арктика
-    - Минорная терция (pitch + 3) — грусть, тревога
-    - program 88 = synth pad (NewAge), 92 = atmosphere, 48 = strings, 51 = choir, 0 = piano
-
-    ДЛЯ АТМОСФЕРЫ VN:
-    - Эмбиент/дрон: bpm 40-60, notes с dur 4-8, vel 70-90, program 88/92, квинты
-    - Тревожно: добавь секунду (pitch+1 или pitch+2), vel 80-100
-    - Меланхолия: bpm 50-65, program 48 (strings), vel 75-90, минорные трезвучия
-    ВАЖНО: vel ниже 60 слишком тихо! Минимум vel=65 для любого звука.
-
-    Верни только результат compose_midi — текст не нужен, инструмент сам прикрепит файл.
-    """,
-)
-
-_music_tool = music_agent.as_tool(
-    tool_name="compose_music",
-    tool_description="Сочинить и прикрепить музыкальный файл (.ogg). Передай описание нужного звука: настроение, сцена, атмосфера. Агент сам подберёт ноты и инструменты.",
-)
+# GLM-5.1: thinking=enabled по умолчанию, требует temperature=1.0
+_glm_heavy = ModelSettings(temperature=1.0, max_tokens=128_000)  # агенты с тулами, сложная логика
+_glm_light = ModelSettings(temperature=1.0, max_tokens=32_000)   # простые ответы без тулов
 
 from agents import function_tool as _ft  # noqa: E402
 from src.bot import rdb as _rdb  # noqa: E402
@@ -124,7 +101,8 @@ async def work_on_chastota(task: str) -> str:
 chat_agent = Agent(
     model=ai_model,
     name="Рин",
-    tools=all_tools + [_music_tool, work_on_chastota, analyze_image, find_files, grep_files, read_file, move_file],
+    tools=all_tools + [audio_tool, work_on_chastota, analyze_image, find_files, grep_files, read_file, move_file],
+    model_settings=_glm_heavy,
     instructions=f"""
     {RIN_LORE}
 
@@ -191,6 +169,7 @@ chat_agent = Agent(
 initiative_agent = Agent(
     model=ai_model,
     name="Рин (инициатива)",
+    model_settings=_glm_light,
     instructions=f"""
     {RIN_LORE}
 
@@ -218,6 +197,7 @@ initiative_agent = Agent(
 self_state_agent = Agent(
     model=ai_model,
     name="Рин (состояние)",
+    model_settings=_glm_light,
     instructions=f"""
     {RIN_LORE}
 
@@ -245,6 +225,7 @@ self_state_agent = Agent(
 history_summary_agent = Agent(
     model=ai_model,
     name="Рин (саммари чата)",
+    model_settings=_glm_light,
     instructions="""
     Тебе дано краткое содержание предыдущего разговора (может быть пустым) и блок новых сообщений из чата сообщества разработчиков визуальных новелл.
     Объедини старое саммари с новыми сообщениями в ОДНО краткое содержание (3-5 предложений).
@@ -257,6 +238,7 @@ history_summary_agent = Agent(
 summary_agent = Agent(
     model=ai_model,
     name="Рин (память)",
+    model_settings=_glm_light,
     instructions="""
     Тебе дан список фактов о человеке из чата сообщества разработчиков визуальных новелл.
     Сожми их в не более чем 6-8 ёмких фактов, сохранив всё важное:

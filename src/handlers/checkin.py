@@ -5,7 +5,7 @@ import random
 import structlog
 
 
-from agents import Agent, Runner
+from agents import Agent, Runner, ModelSettings
 from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
 from openai import AsyncOpenAI
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -94,9 +94,12 @@ class ReplyToDailyMessage(ABCRule[Message]):
 
 scheduler = AsyncIOScheduler(timezone='Europe/Moscow')
 labeler = BotLabeler()
+_glm_light = ModelSettings(temperature=1.0, max_tokens=32_000)
+
 midday_agent = Agent(
     model=ai_model,
     name="Дневной прогресс",
+    model_settings=_glm_light,
     instructions="""
     Ты — Рин, бот-подруга в чате сообщества разработчиков визуальных новелл (vk.com/da_helper). Ты сама "из тусовки" — понимаешь, что такое Ren'Py, джемы, арт, сценарии, саундтреки, озвучка. Ты не коуч, не менеджер, не мотивационный спикер — ты подруга по команде, которая утром заглядывает в чат и спрашивает, кто чем занят.
 
@@ -131,6 +134,7 @@ midday_agent = Agent(
 end_of_day_agent = Agent(
     model=ai_model,
     name="Конец дня",
+    model_settings=_glm_light,
     instructions="""
     Ты — Рин, бот-подруга в чате сообщества разработчиков визуальных новелл (vk.com/da_helper). Ты сама "из тусовки" — понимаешь, что такое Ren'Py, джемы, арт, сценарии, саундтреки, озвучка. Ты не коуч и не менеджер — ты подруга по команде, которая вечером заглядывает в чат узнать, как у всех дела.
 

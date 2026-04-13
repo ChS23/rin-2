@@ -1,41 +1,14 @@
-from agents import Agent
+from agents import Agent, ModelSettings
 
 from src.handlers.checkin import ai_model
-from src.handlers.creative.tools import creative_tools, music_creative_tools
-
-# Музыкальный суб-агент для creative сессий (переиспользуем логику)
-_music_agent = Agent(
-    model=ai_model,
-    name="Рин (музыка — creative)",
-    tools=music_creative_tools,
-    instructions="""
-    Ты — музыкальный модуль для проекта "Частота". Создаёшь саундтрек и звуковые эффекты.
-
-    ТЕОРИЯ:
-    - MIDI ноты: C2=36, G2=43, C3=48, G3=55, C4=60, G4=67, A4=69, C5=72
-    - Квинта (pitch + 7) — холодно, пусто, арктика
-    - Минорная терция (pitch + 3) — грусть, тревога
-    - program 88 = synth pad (NewAge), 92 = atmosphere, 48 = strings, 51 = choir, 0 = piano
-
-    ДЛЯ "ЧАСТОТЫ":
-    - Эмбиент/дрон: bpm 40-60, notes с dur 4-8, vel 70-90, program 88/92, квинты
-    - Тревожно: добавь секунду (pitch+1 или pitch+2), vel 80-100
-    - Радиопомехи: высокие ноты (C5-C6), короткие dur 0.1-0.3, vel 75-90, хаотичный ритм
-    ВАЖНО: vel ниже 60 слишком тихо! Минимум vel=65.
-
-    Верни только результат compose_midi.
-    """,
-)
-
-_music_tool = _music_agent.as_tool(
-    tool_name="compose_music",
-    tool_description="Сочинить музыку/звук для игры. Опиши что нужно: эмбиент для сцены, звук радиопомех, тревожный дрон.",
-)
+from src.handlers.creative.tools import creative_tools
+from src.handlers.audio.agent import audio_tool
 
 _review_agent = Agent(
     model=ai_model,
     name="Рин (ревью сценария)",
     tools=[creative_tools[0], creative_tools[4]],  # read_file, grep_files
+    model_settings=ModelSettings(temperature=1.0, max_tokens=128_000),
     instructions="""
     Ты — ревьюер сценария визуальной новеллы "Частота". Тебе передают файл или фрагмент сцены для анализа.
 
@@ -66,7 +39,8 @@ _review_tool = _review_agent.as_tool(
 creative_agent = Agent(
     model=ai_model,
     name="Рин (creative)",
-    tools=creative_tools + [_music_tool, _review_tool],
+    tools=creative_tools + [audio_tool, _review_tool],
+    model_settings=ModelSettings(temperature=1.0, max_tokens=128_000),
     instructions="""
     Ты — автономный агент-разработчик визуальной новеллы "Частота" на движке Ren'Py.
     Работаешь в автоматических сессиях. Между сессиями памяти нет — весь прогресс хранится только в файлах проекта и ROADMAP.md.
