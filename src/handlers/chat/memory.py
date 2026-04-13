@@ -98,15 +98,49 @@ def get_memory_for_ids(user_ids: set[str], exclude_uid: int | None = None) -> st
     return "\n".join(lines)
 
 
-def extract_user_ids_from_history(messages: list[str]) -> set[str]:
-    """Извлечь user_id из истории формата '@123 Имя: текст' или 'Имя: текст'."""
+def extract_participants_from_history(messages: list[str]) -> tuple[set[str], set[str]]:
+    """Извлечь user_id и имена из истории.
+    Новый формат: '@123 Имя: текст' → id.
+    Старый формат: 'Имя: текст' → имя (fallback).
+    Возвращает (user_ids, names_without_ids).
+    """
     import re
     ids = set()
+    names = set()
     for msg in messages:
         m = re.match(r"@(\d+) ", msg)
         if m:
             ids.add(m.group(1))
-    return ids
+        elif ": " in msg:
+            name = msg.split(": ", 1)[0]
+            if name and name != "Рин":
+                names.add(name)
+    return ids, names
+
+
+def get_memory_for_participants(user_ids: set[str], names: set[str], exclude_uid: int | None = None) -> str:
+    """Вернуть факты о людях по id (приоритет) или по имени (fallback для старой истории)."""
+    memory = load_memory()
+    if not memory:
+        return ""
+    exclude = str(exclude_uid) if exclude_uid else None
+    lines = []
+    seen = set()
+    # Сначала точное совпадение по id
+    for uid, entry in memory.items():
+        if uid == exclude:
+            continue
+        if uid in user_ids and entry.get("facts"):
+            lines.append(f"{entry['name']}: {'; '.join(entry['facts'][:5])}")
+            seen.add(entry["name"])
+    # Потом fallback по имени (старые записи без id)
+    if names:
+        for uid, entry in memory.items():
+            if uid == exclude or entry["name"] in seen:
+                continue
+            if entry["name"] in names and entry.get("facts"):
+                lines.append(f"{entry['name']}: {'; '.join(entry['facts'][:5])}")
+    return "\n".join(lines)
 
 
 async def _compress_facts(user_name: str, facts: list[str]) -> list[str]:

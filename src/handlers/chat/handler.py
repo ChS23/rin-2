@@ -22,7 +22,7 @@ from src.handlers.chat.tools import PENDING_FILE_KEY
 from src.handlers.chat.memory import (
     record_message, get_context,
     remember_facts, forget_facts, maybe_compress_memory,
-    get_user_memory, get_memory_for_ids, extract_user_ids_from_history,
+    get_user_memory, get_memory_for_participants, extract_participants_from_history,
     get_rin_self_state, refresh_rin_self_state, update_rin_self_state,
     update_last_seen, get_days_since,
 )
@@ -358,9 +358,9 @@ async def chat_with_rin(message: Message):
 
     # Фильтруем память — только участники из последних сообщений
     recent_messages = await rdb.lrange(f"rin:chat:{message.peer_id}:history", -30, -1)
-    chat_user_ids = extract_user_ids_from_history(recent_messages)
-    chat_user_ids.add(str(message.from_id))
-    relevant_memory = get_memory_for_ids(chat_user_ids, exclude_uid=message.from_id)
+    chat_ids, chat_names = extract_participants_from_history(recent_messages)
+    chat_ids.add(str(message.from_id))
+    relevant_memory = get_memory_for_participants(chat_ids, chat_names, exclude_uid=message.from_id)
 
     # Явный mood directive по времени суток
     hour = now.hour
@@ -518,8 +518,8 @@ async def rin_initiative():
 
     # Для инициативы — память о людях из недавнего чата
     recent = await rdb.lrange(f"rin:chat:{CHAT_PEER_ID}:history", -30, -1)
-    chat_user_ids = extract_user_ids_from_history(recent)
-    relevant_memory = get_memory_for_ids(chat_user_ids)
+    chat_ids, chat_names = extract_participants_from_history(recent)
+    relevant_memory = get_memory_for_participants(chat_ids, chat_names)
 
     prompt_parts = [f"Текущий день: {datetime.datetime.now().strftime('%d.%m.%Y %A')}"]
     if self_state:
