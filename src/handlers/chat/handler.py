@@ -380,9 +380,18 @@ async def chat_with_rin(message: Message):
     elif weekday >= 5:
         mood += ", выходные — расслабленная"
 
+    # Порядок: ситуация → self → чат → другие → community → user facts → сообщение
+    # (user facts и сообщение в конце — recency effect для трансформера)
     prompt_parts = [f"Сейчас: {now.strftime('%d.%m.%Y %H:%M, %A')}. Ты сейчас {mood}."]
     if self_state:
         prompt_parts.append("Твой текущий прогресс и состояние:\n" + "\n".join(f"- {s}" for s in self_state))
+    if context:
+        prompt_parts.append(context)
+    if relevant_memory:
+        prompt_parts.append(f"Что ты помнишь об участниках разговора:\n{relevant_memory}")
+    if community:
+        prompt_parts.append(f"Инфо о сообществе:\n{community}")
+    # User facts ближе к сообщению — важнее всего для ответа
     if user_facts:
         user_ctx = f"Что ты помнишь о {user_name}:\n" + "\n".join(f"- {f}" for f in user_facts)
         if days_since is not None and days_since >= 7:
@@ -392,12 +401,6 @@ async def chat_with_rin(message: Message):
         prompt_parts.append(f"({user_name} впервые пишет тебе)")
     elif days_since >= 7:
         prompt_parts.append(f"({user_name} не заходил {days_since} дней)")
-    if relevant_memory:
-        prompt_parts.append(f"Что ты помнишь об участниках разговора:\n{relevant_memory}")
-    if community:
-        prompt_parts.append(f"Инфо о сообществе:\n{community}")
-    if context:
-        prompt_parts.append(context)
     attachments = await _extract_attachments(message)
     msg = f"{user_name} обращается к тебе: {text}"
     if attachments:
