@@ -83,6 +83,32 @@ def get_all_memory_summary() -> str:
     return "\n".join(lines)
 
 
+def get_memory_for_ids(user_ids: set[str], exclude_uid: int | None = None) -> str:
+    """Вернуть факты только о людях из user_ids (участники чата)."""
+    memory = load_memory()
+    if not memory:
+        return ""
+    exclude = str(exclude_uid) if exclude_uid else None
+    lines = []
+    for uid, entry in memory.items():
+        if uid == exclude:
+            continue
+        if uid in user_ids and entry.get("facts"):
+            lines.append(f"{entry['name']}: {'; '.join(entry['facts'][:5])}")
+    return "\n".join(lines)
+
+
+def extract_user_ids_from_history(messages: list[str]) -> set[str]:
+    """Извлечь user_id из истории формата '@123 Имя: текст' или 'Имя: текст'."""
+    import re
+    ids = set()
+    for msg in messages:
+        m = re.match(r"@(\d+) ", msg)
+        if m:
+            ids.add(m.group(1))
+    return ids
+
+
 async def _compress_facts(user_name: str, facts: list[str]) -> list[str]:
     try:
         prompt = f"Факты о {user_name}:\n" + "\n".join(f"- {f}" for f in facts)
@@ -138,11 +164,13 @@ async def record_message(peer_id: int, from_id: int, text: str, resolve_name):
 
     if from_id == -GROUP_ID:
         name = "Рин"
+        uid_prefix = ""
     else:
         name = await resolve_name(from_id)
+        uid_prefix = f"@{from_id} "
 
     key = _history_key(peer_id)
-    await rdb.rpush(key, f"{name}: {text}")
+    await rdb.rpush(key, f"{uid_prefix}{name}: {text}")
     await rdb.ltrim(key, -HISTORY_SIZE, -1)
     length = await rdb.llen(key)
     await logger.adebug("Valkey: записано сообщение", key=key, length=length)

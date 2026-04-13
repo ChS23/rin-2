@@ -22,7 +22,7 @@ from src.handlers.chat.tools import PENDING_FILE_KEY
 from src.handlers.chat.memory import (
     record_message, get_context,
     remember_facts, forget_facts, maybe_compress_memory,
-    get_user_memory, get_all_memory_summary,
+    get_user_memory, get_memory_for_ids, extract_user_ids_from_history,
     get_rin_self_state, refresh_rin_self_state, update_rin_self_state,
     update_last_seen, get_days_since,
 )
@@ -352,12 +352,35 @@ async def chat_with_rin(message: Message):
     now = datetime.datetime.now()
     context = await get_context(message.peer_id)
     user_facts = get_user_memory(message.from_id)
-    all_memory = get_all_memory_summary()
     community = get_community_context()
     self_state = await get_rin_self_state()
     days_since = await get_days_since(message.from_id)
 
-    prompt_parts = [f"Сейчас: {now.strftime('%d.%m.%Y %H:%M, %A')}"]
+    # Фильтруем память — только участники из последних сообщений
+    recent_messages = await rdb.lrange(f"rin:chat:{message.peer_id}:history", -30, -1)
+    chat_user_ids = extract_user_ids_from_history(recent_messages)
+    chat_user_ids.add(str(message.from_id))
+    relevant_memory = get_memory_for_ids(chat_user_ids, exclude_uid=message.from_id)
+
+    # Явный mood directive по времени суток
+    hour = now.hour
+    if 6 <= hour < 11:
+        mood = "бодрая, утренняя энергия"
+    elif 12 <= hour < 17:
+        mood = "ровная, рабочее настроение"
+    elif 18 <= hour < 23:
+        mood = "ленивая, устала"
+    else:
+        mood = "хаотичная, ночной режим"
+    weekday = now.weekday()
+    if weekday == 0:
+        mood += ", понедельник — ворчливая"
+    elif weekday == 4:
+        mood += ", пятница — на подъёме"
+    elif weekday >= 5:
+        mood += ", выходные — расслабленная"
+
+    prompt_parts = [f"Сейчас: {now.strftime('%d.%m.%Y %H:%M, %A')}. Ты сейчас {mood}."]
     if self_state:
         prompt_parts.append("Твой текущий прогресс и состояние:\n" + "\n".join(f"- {s}" for s in self_state))
     if user_facts:
@@ -369,8 +392,8 @@ async def chat_with_rin(message: Message):
         prompt_parts.append(f"({user_name} впервые пишет тебе)")
     elif days_since >= 7:
         prompt_parts.append(f"({user_name} не заходил {days_since} дней)")
-    if all_memory:
-        prompt_parts.append(f"Что ты помнишь о других участниках:\n{all_memory}")
+    if relevant_memory:
+        prompt_parts.append(f"Что ты помнишь об участниках разговора:\n{relevant_memory}")
     if community:
         prompt_parts.append(f"Инфо о сообществе:\n{community}")
     if context:
@@ -488,14 +511,18 @@ async def rin_self_state_update():
 @scheduler.scheduled_job(trigger="cron", hour=13, minute=30)
 async def rin_initiative():
     context = await get_context(CHAT_PEER_ID)
-    all_memory = get_all_memory_summary()
     self_state = await get_rin_self_state()
+
+    # Для инициативы — память о людях из недавнего чата
+    recent = await rdb.lrange(f"rin:chat:{CHAT_PEER_ID}:history", -30, -1)
+    chat_user_ids = extract_user_ids_from_history(recent)
+    relevant_memory = get_memory_for_ids(chat_user_ids)
 
     prompt_parts = [f"Текущий день: {datetime.datetime.now().strftime('%d.%m.%Y %A')}"]
     if self_state:
         prompt_parts.append("Твой текущий прогресс и состояние:\n" + "\n".join(f"- {s}" for s in self_state))
-    if all_memory:
-        prompt_parts.append(f"Что ты помнишь об участниках:\n{all_memory}")
+    if relevant_memory:
+        prompt_parts.append(f"Что ты помнишь об участниках:\n{relevant_memory}")
     if context:
         prompt_parts.append(context)
     prompt_parts.append("Напиши что-нибудь в чат от себя.")
