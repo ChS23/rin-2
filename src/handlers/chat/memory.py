@@ -150,7 +150,11 @@ async def record_message(peer_id: int, from_id: int, text: str, resolve_name):
     count = await rdb.incr(_counter_key(peer_id))
     if count >= SUMMARIZE_EVERY:
         await rdb.set(_counter_key(peer_id), 0)
-        await _compress_chat_history(peer_id)
+        # Не сжимать чаще раза в час
+        throttle_key = f"rin:chat:{peer_id}:compress_at"
+        if not await rdb.exists(throttle_key):
+            await rdb.set(throttle_key, "1", ex=3600)
+            await _compress_chat_history(peer_id)
 
 
 async def _compress_chat_history(peer_id: int):
@@ -190,7 +194,9 @@ async def get_context(peer_id: int) -> str:
 # ═══════════════════════════════════════════════════════════
 
 RIN_SELF_KEY = "rin:self:state"
+RIN_SELF_ARCHIVE_KEY = "rin:self:archive"
 RIN_SELF_MAX = 15
+RIN_ARCHIVE_MAX = 50
 
 
 RIN_INITIAL_STATE = [
@@ -223,9 +229,29 @@ async def get_rin_self_state() -> list[str]:
 
 
 async def update_rin_self_state(new_state: list[str]):
-    """Перезаписать состояние Рин"""
-    trimmed = new_state[-RIN_SELF_MAX:]
-    await rdb.set(RIN_SELF_KEY, orjson.dumps(trimmed).decode())
+    """Перезаписать состояние Рин, вытесненные факты уходят в архив"""
+    if len(new_state) > RIN_SELF_MAX:
+        overflow = new_state[:-RIN_SELF_MAX]
+        # Добавляем в архив
+        raw_archive = await rdb.get(RIN_SELF_ARCHIVE_KEY)
+        archive = orjson.loads(raw_archive) if raw_archive else []
+        archive.extend(overflow)
+        archive = archive[-RIN_ARCHIVE_MAX:]  # ротация архива
+        await rdb.set(RIN_SELF_ARCHIVE_KEY, orjson.dumps(archive).decode())
+        new_state = new_state[-RIN_SELF_MAX:]
+    await rdb.set(RIN_SELF_KEY, orjson.dumps(new_state).decode())
+
+
+async def get_rin_self_archive() -> list[str]:
+    """Получить архив вытесненных состояний Рин"""
+    raw = await rdb.get(RIN_SELF_ARCHIVE_KEY)
+    if not raw:
+        return []
+    try:
+        data = orjson.loads(raw)
+        return data if isinstance(data, list) else []
+    except (orjson.JSONDecodeError, TypeError):
+        return []
 
 
 async def refresh_rin_self_state(peer_id: int):

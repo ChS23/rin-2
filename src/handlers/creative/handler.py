@@ -23,15 +23,27 @@ ADMIN_ID = 326129427
 
 
 class CreativeLoggingHooks(RunHooks):
+    def __init__(self):
+        self._last_checkpoint = 0
+        self._checkpoint_interval = 300  # 5 минут
+
     async def on_agent_start(self, context, agent: Agent, **kwargs):
+        import time
+        self._last_checkpoint = time.time()
         await logger.ainfo("Creative: агент запущен", agent=agent.name)
 
     async def on_tool_start(self, context, agent: Agent, tool: Tool, **kwargs):
         await logger.ainfo("Creative: вызов инструмента", agent=agent.name, tool=tool.name)
 
     async def on_tool_end(self, context, agent: Agent, tool: Tool, result: str, **kwargs):
+        import time
         short = (result or "")[:200]
         await logger.ainfo("Creative: инструмент завершён", tool=tool.name, result=short)
+        # Checkpoint каждые 5 минут — автокоммит промежуточных изменений
+        if time.time() - self._last_checkpoint >= self._checkpoint_interval:
+            self._last_checkpoint = time.time()
+            await _git_auto_commit(f"checkpoint: {tool.name}")
+            await logger.ainfo("Creative: checkpoint сохранён")
 
     async def on_agent_end(self, context, agent: Agent, output, **kwargs):
         short = str(output or "")[:200]

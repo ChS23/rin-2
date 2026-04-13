@@ -287,60 +287,54 @@ async def _probe_audio(url: str) -> str:
 
 
 async def _extract_attachments(message: Message) -> list[str]:
-    """Извлечь описания аттачментов из сообщения."""
+    """Извлечь описания аттачментов из сообщения (async операции параллельно)."""
     if not message.attachments:
         return []
-    items = []
-    for att in message.attachments:
+
+    async def _process_one(att) -> str | None:
         if not att.type:
-            continue
+            return None
         t = att.type.value
         if t == "photo" and att.photo:
             sizes = att.photo.sizes or []
             url = max(sizes, key=lambda s: (s.width or 0) * (s.height or 0)).url if sizes else None
-            if url:
-                items.append(f"[фото: {url}]")
+            return f"[фото: {url}]" if url else None
         elif t == "video" and att.video:
             title = att.video.title or "видео"
-            dur = att.video.duration or 0
-            items.append(f"[видео: {title}, {dur}с]")
+            return f"[видео: {title}, {att.video.duration or 0}с]"
         elif t == "audio" and att.audio:
             artist = att.audio.artist or "?"
             title = att.audio.title or "?"
             dur = att.audio.duration or 0
-            mins = dur // 60
-            secs = dur % 60
-            items.append(f"[аудио: {artist} — {title}, {mins}:{secs:02d}]")
+            return f"[аудио: {artist} — {title}, {dur // 60}:{dur % 60:02d}]"
         elif t == "doc" and att.doc:
             title = att.doc.title or "файл"
             ext = title.rsplit(".", 1)[-1].lower() if "." in title else ""
             if ext in ("ogg", "mp3", "wav", "flac", "opus", "m4a", "aac"):
                 meta = await _probe_audio(att.doc.url)
-                items.append(f"[аудиофайл: {title}, {meta}]")
-            else:
-                items.append(f"[файл: {title}, {att.doc.size} байт, url={att.doc.url}]")
+                return f"[аудиофайл: {title}, {meta}]"
+            return f"[файл: {title}, {att.doc.size} байт, url={att.doc.url}]"
         elif t == "audio_message" and att.audio_message:
             transcript = await _transcribe_audio(att.audio_message.link_ogg)
             if transcript:
-                items.append(f'[голосовое ({att.audio_message.duration}с): "{transcript}"]')
-            else:
-                items.append(f"[голосовое: {att.audio_message.duration}с]")
+                return f'[голосовое ({att.audio_message.duration}с): "{transcript}"]'
+            return f"[голосовое: {att.audio_message.duration}с, не удалось расшифровать]"
         elif t == "sticker" and att.sticker:
-            items.append("[стикер]")
+            return "[стикер]"
         elif t == "link" and att.link:
-            items.append(f"[ссылка: {att.link.url}]")
+            return f"[ссылка: {att.link.url}]"
         elif t == "wall" and att.wall:
-            items.append("[репост записи]")
+            return "[репост записи]"
         elif t == "poll" and att.poll:
-            q = att.poll.question or "опрос"
-            items.append(f"[опрос: {q}]")
+            return f"[опрос: {att.poll.question or 'опрос'}]"
         elif t == "graffiti":
-            items.append("[граффити]")
+            return "[граффити]"
         elif t == "story":
-            items.append("[история]")
-        else:
-            items.append(f"[{t}]")
-    return items
+            return "[история]"
+        return f"[{t}]"
+
+    results = await asyncio.gather(*[_process_one(att) for att in message.attachments])
+    return [r for r in results if r]
 
 
 @labeler.chat_message(MentionsBot())
