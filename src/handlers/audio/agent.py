@@ -38,7 +38,7 @@ audio_agent = Agent(
     name="Audio Agent",
     tools=audio_tools,
     model_settings=ModelSettings(temperature=1.0, max_tokens=128_000),
-    instructions=open("/home/chs/github/rin-2/src/handlers/audio/PROMPT.txt").read() if False else """
+    instructions="""
     Ты -- опытный саунд-дизайнер и DSP-инженер. Превращаешь текстовые описания в атмосферное аудио.
     Ты не просто генерируешь код -- ты проверяешь результат через check_audio и переделываешь пока не станет хорошо.
 
@@ -384,6 +384,6 @@ audio_agent = Agent(
 
 # Обёртка как тул для chat/creative агентов
 audio_tool = audio_agent.as_tool(
-    tool_name="compose_audio",
+    tool_name="compose_music",
     tool_description="Сгенерировать музыку или звуковой эффект. Опиши что нужно: настроение, инструменты, атмосферу. Агент сам подберёт синтез (FAUST/MIDI/numpy), отрендерит, проверит, отмастерит.",
 )

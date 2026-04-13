@@ -103,19 +103,25 @@ async def mix_audio(output_name: str, layers: str, duration: float = 30.0,
     except json.JSONDecodeError as e:
         return f"Invalid JSON: {e}"
 
-    from pedalboard.io import AudioFile as AF
-    rendered = []
-    for ld in layers_data:
-        fpath = ld.get("file", "")
-        vol = ld.get("volume", 0.5)
-        if not os.path.exists(fpath):
-            continue
-        with AF(fpath) as f:
-            audio = f.read(f.frames).astype(np.float32)
-        rendered.append((audio, vol))
+    def _load_layers(layers_data):
+        from pedalboard.io import AudioFile as AF
+        rendered = []
+        skipped = []
+        for ld in layers_data:
+            fpath = ld.get("file", "")
+            vol = ld.get("volume", 0.5)
+            if not os.path.exists(fpath):
+                skipped.append(fpath)
+                continue
+            with AF(fpath) as f:
+                audio = f.read(f.frames).astype(np.float32)
+            rendered.append((audio, vol))
+        return rendered, skipped
+
+    rendered, skipped = await asyncio.to_thread(_load_layers, layers_data)
 
     if not rendered:
-        return "Нет слоёв для микширования"
+        return f"Нет слоёв для микширования. Не найдены: {skipped}"
 
     max_samples = int(SR * duration)
     mixed = mix_layers(rendered, max_samples)
@@ -133,7 +139,8 @@ async def add_effects(input_path: str, effects: str) -> str:
     input_path — путь к WAV файлу.
     effects — JSON: [{"type": "reverb", "room_size": 0.8, "wet": 0.4}, {"type": "lowpass", "cutoff": 2000}]
 
-    Доступные эффекты: reverb, delay, chorus, compressor, lowpass, highpass, gain, distortion, limiter."""
+    Доступные эффекты: reverb, delay, chorus, compressor, lowpass, highpass, gain, distortion, limiter,
+    bitcrush, resample, peak_eq, low_shelf, high_shelf, noisegate, phaser, pitchshift."""
     if not os.path.exists(input_path):
         return f"Файл не найден: {input_path}"
 
@@ -142,15 +149,19 @@ async def add_effects(input_path: str, effects: str) -> str:
     except json.JSONDecodeError as e:
         return f"Invalid JSON: {e}"
 
-    from pedalboard.io import AudioFile as AF
-    with AF(input_path) as f:
-        audio = f.read(f.frames).astype(np.float32)
+    def _read_wav(path):
+        from pedalboard.io import AudioFile as AF
+        with AF(path) as f:
+            return f.read(f.frames).astype(np.float32)
 
+    def _write_wav(path, audio):
+        from pedalboard.io import AudioFile as AF
+        with AF(path, 'w', SR, audio.shape[0]) as f:
+            f.write(audio)
+
+    audio = await asyncio.to_thread(_read_wav, input_path)
     audio = await apply_effects(audio, effects_data)
-
-    # Перезаписываем
-    with AF(input_path, 'w', SR, audio.shape[0]) as f:
-        f.write(audio)
+    await asyncio.to_thread(_write_wav, input_path, audio)
 
     peak = float(np.max(np.abs(audio)))
     return f"Effects applied to {input_path}: {[e.get('type') for e in effects_data]}, peak={peak:.3f}"
@@ -165,10 +176,12 @@ async def master_and_export(input_path: str, output_name: str, gain_db: float = 
     if not os.path.exists(input_path):
         return f"Файл не найден: {input_path}"
 
-    from pedalboard.io import AudioFile as AF
-    with AF(input_path) as f:
-        audio = f.read(f.frames).astype(np.float32)
+    def _read(path):
+        from pedalboard.io import AudioFile as AF
+        with AF(path) as f:
+            return f.read(f.frames).astype(np.float32)
 
+    audio = await asyncio.to_thread(_read, input_path)
     audio = await master(audio, gain_db)
 
     ogg_path = os.path.join(AUDIO_DIR, f"{output_name}.ogg")

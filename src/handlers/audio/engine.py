@@ -340,8 +340,9 @@ def _analyze_audio_sync(path: str) -> str:
         rms_db = 20 * np.log10(rms) if rms > 0 else -100
 
         mono = audio[0] if audio.ndim == 2 else audio
-        fft = np.abs(np.fft.rfft(mono[:sr]))
-        freqs = np.fft.rfftfreq(sr, 1 / sr)
+        n = min(len(mono), sr)
+        fft = np.abs(np.fft.rfft(mono[:n]))
+        freqs = np.fft.rfftfreq(n, 1 / sr)
         top_indices = np.argsort(fft)[-5:][::-1]
         dominant = [(int(freqs[i]), float(fft[i])) for i in top_indices if freqs[i] > 20]
 
