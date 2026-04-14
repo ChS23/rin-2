@@ -5,9 +5,8 @@ from pathlib import Path
 import orjson
 
 import structlog
-from agents import Runner
-
 from src.bot import rdb
+from src.utils import run_agent_streamed
 from src.handlers.checkin import ai_lock
 from src.handlers.chat.agents import summary_agent, history_summary_agent
 from src.utils import safe_json_write
@@ -147,7 +146,7 @@ async def _compress_facts(user_name: str, facts: list[str]) -> list[str]:
     try:
         prompt = f"Факты о {user_name}:\n" + "\n".join(f"- {f}" for f in facts)
         async with ai_lock:
-            result = await Runner.run(summary_agent, prompt)
+            result = await run_agent_streamed(summary_agent, prompt)
         raw = result.final_output.strip()
         compressed = orjson.loads(raw)
         if isinstance(compressed, list) and compressed:
@@ -232,7 +231,7 @@ async def _compress_chat_history(peer_id: int):
 
     try:
         async with ai_lock:
-            result = await Runner.run(history_summary_agent, "\n\n".join(prompt_parts))
+            result = await run_agent_streamed(history_summary_agent, "\n\n".join(prompt_parts))
         summary = result.final_output.strip().strip('"')
         await rdb.set(_summary_key(peer_id), summary)
         await logger.ainfo("История чата сжата", peer_id=peer_id, summary=summary)
@@ -334,7 +333,7 @@ async def refresh_rin_self_state(peer_id: int):
 
     try:
         async with ai_lock:
-            result = await Runner.run(self_state_agent, "\n\n".join(prompt_parts))
+            result = await run_agent_streamed(self_state_agent, "\n\n".join(prompt_parts))
         raw = result.final_output.strip()
         updated = orjson.loads(raw)
         if isinstance(updated, list) and updated:

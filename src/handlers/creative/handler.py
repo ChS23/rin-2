@@ -3,7 +3,8 @@ import datetime
 import random
 
 import structlog
-from agents import Runner, RunConfig, RunHooks, Agent, Tool
+from agents import RunConfig, RunHooks, Agent, Tool
+from src.utils import run_agent_streamed
 
 from vkbottle.bot import Message, BotLabeler
 from vkbottle.tools import Keyboard, Text, KeyboardButtonColor
@@ -131,7 +132,7 @@ async def _post_to_chat(raw_output: str):
         async with ai_lock:
             await rdb.delete(PENDING_FILE_KEY)
             result = await asyncio.wait_for(
-                Runner.run(chat_agent, prompt),
+                run_agent_streamed(chat_agent, prompt),
                 timeout=60,
             )
             await rdb.delete(PENDING_FILE_KEY)  # Убираем если chat_agent что-то прикрепил
@@ -157,7 +158,7 @@ async def _run_and_save(prompt: str, label: str, post_result: bool = True):
     try:
         async with ai_lock:
             result = await asyncio.wait_for(
-                Runner.run(creative_agent, prompt, run_config=_run_config, hooks=_hooks, max_turns=MAX_TURNS),
+                run_agent_streamed(creative_agent, prompt, run_config=_run_config, hooks=_hooks, max_turns=MAX_TURNS),
                 timeout=1800,
             )
 
@@ -354,7 +355,7 @@ async def dm_post_message(message: Message, idea: str):
         prompt = f"Напиши в чат сообщение со следующим смыслом (1-3 предложения, своими словами): {idea}"
         async with ai_lock:
             await rdb.delete(PENDING_FILE_KEY)
-            result = await asyncio.wait_for(Runner.run(chat_agent, prompt), timeout=60)
+            result = await asyncio.wait_for(run_agent_streamed(chat_agent, prompt), timeout=60)
             await rdb.delete(PENDING_FILE_KEY)
 
         from src.handlers.chat.utils import parse_response

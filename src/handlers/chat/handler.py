@@ -13,9 +13,10 @@ from vkbottle import BaseMiddleware
 from vkbottle.bot import Message, BotLabeler
 from vkbottle.dispatch.rules import ABCRule
 
-from agents import Runner, RunHooks
+from agents import RunHooks
 
 from src.bot import api, rdb
+from src.utils import run_agent_streamed
 from src.handlers.checkin import ai_lock, REACTIONS, scheduler, CHAT_PEER_ID
 from src.handlers.chat.agents import chat_agent, initiative_agent
 from src.handlers.chat.tools import PENDING_FILE_KEY
@@ -412,7 +413,7 @@ async def chat_with_rin(message: Message):
     try:
         async with ai_lock:
             await rdb.delete(PENDING_FILE_KEY)
-            result = await asyncio.wait_for(Runner.run(chat_agent, prompt, hooks=_chat_hooks), timeout=600)
+            result = await asyncio.wait_for(run_agent_streamed(chat_agent, prompt, hooks=_chat_hooks), timeout=600)
     except asyncio.TimeoutError:
         await logger.aerror("Таймаут AI в чате")
         return
@@ -534,7 +535,7 @@ async def rin_initiative():
 
     try:
         async with ai_lock:
-            result = await Runner.run(initiative_agent, prompt)
+            result = await run_agent_streamed(initiative_agent, prompt)
 
         text = result.final_output.strip().strip('"')
 

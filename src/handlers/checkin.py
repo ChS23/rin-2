@@ -5,7 +5,7 @@ import random
 import structlog
 
 
-from agents import Agent, Runner, ModelSettings
+from agents import Agent, ModelSettings
 from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
 from openai import AsyncOpenAI
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -14,6 +14,7 @@ from vkbottle.dispatch.rules import ABCRule
 from vkbottle.bot import Message, BotLabeler
 
 from src.bot import api, rdb
+from src.utils import run_agent_streamed
 
 ai_client = AsyncOpenAI(
     api_key=os.getenv("AI_API_KEY"),
@@ -226,7 +227,7 @@ async def end_of_day_checkin():
 
     try:
         async with ai_lock:
-            result = await Runner.run(end_of_day_agent, prompt)
+            result = await run_agent_streamed(end_of_day_agent, prompt)
         await api.messages.send(
             peer_ids=[CHAT_PEER_ID],
             message=result.final_output,
@@ -240,7 +241,7 @@ async def end_of_day_checkin():
 async def midday_checkin():
     try:
         async with ai_lock:
-            result = await Runner.run(midday_agent, f"Текущий день: {datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=3))).strftime('%d.%m.%Y %A %B')}")
+            result = await run_agent_streamed(midday_agent, f"Текущий день: {datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=3))).strftime('%d.%m.%Y %A %B')}")
 
         response = await api.messages.send(
             peer_ids=[CHAT_PEER_ID],
