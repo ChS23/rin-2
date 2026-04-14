@@ -269,6 +269,7 @@ from openai import AsyncOpenAI
 _vision_client = AsyncOpenAI(
     api_key=os.getenv("AI_API_KEY"),
     base_url=os.getenv("AI_BASE_URL"),
+    default_headers={"User-Agent": "opencode/1.0"},
 )
 VISION_MODEL = "glm-4.6v"
 

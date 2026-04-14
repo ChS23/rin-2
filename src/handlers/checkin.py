@@ -18,6 +18,7 @@ from src.bot import api, rdb
 ai_client = AsyncOpenAI(
     api_key=os.getenv("AI_API_KEY"),
     base_url=os.getenv("AI_BASE_URL"),
+    default_headers={"User-Agent": "opencode/1.0"},
 )
 ai_model = OpenAIChatCompletionsModel(
     model=os.getenv("AI_MODEL", "gpt-4o"),
