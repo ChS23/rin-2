@@ -188,23 +188,28 @@ class ChatHistoryMiddleware(BaseMiddleware[Message]):
 labeler.message_view.register_middleware(ChatHistoryMiddleware)
 
 
+# Имя как отдельное слово + склонения. \b защищает от "Марина", "принтер", "ринг".
+_NAME_RE = re.compile(r'\b(рин|рина|рину|рине|рины|рином|ринчик|ринка|ринку)\b', re.IGNORECASE)
+
+
 class MentionsBot(ABCRule[Message]):
-    async def check(self, event: Message) -> bool:
+    async def check(self, event: Message):
         if not event.peer_id > 2000000000:
             return False
+        # Прямое обращение — отвечаем всегда
         if event.reply_message and event.reply_message.from_id == -GROUP_ID:
             return True
-        if event.fwd_messages:
-            for fwd in event.fwd_messages:
-                if fwd.from_id == -GROUP_ID:
-                    return True
-        mention_patterns = [
-            f"[club{GROUP_ID}|",
-            "@rinchan_bot",
-            f"@club{GROUP_ID}",
-        ]
+        if event.fwd_messages and any(f.from_id == -GROUP_ID for f in event.fwd_messages):
+            return True
+        if event.is_mentioned:  # нативное упоминание тегом [club…|]
+            return True
         text_lower = (event.text or "").lower()
-        return any(p.lower() in text_lower for p in mention_patterns)
+        if "@rinchan_bot" in text_lower:
+            return True
+        # Обращение по имени — отвечаем мягко (кулдаун в хендлере + модель сама решает молчать)
+        if event.text and _NAME_RE.search(event.text):
+            return {"by_name": True}
+        return False
 
 
 # ═══════════════════════════════════════════════════════════
@@ -339,7 +344,14 @@ async def _extract_attachments(message: Message) -> list[str]:
 
 
 @labeler.chat_message(MentionsBot())
-async def chat_with_rin(message: Message):
+async def chat_with_rin(message: Message, by_name: bool = False):
+    # Триггер по имени (не прямой пинг) — мягкий анти-спам: не чаще раза в 20с на чат,
+    # чтобы в потоке "Рин… Рин…" не строчила дорогими LLM-вызовами.
+    if by_name:
+        cd_key = f"rin:name_cooldown:{message.peer_id}"
+        if await rdb.exists(cd_key):
+            return
+        await rdb.set(cd_key, "1", ex=20)
     text = message.text or ""
     text = re.sub(r'\[club\d+\|[^\]]*\]', '', text).strip()
     text = re.sub(r'@rinchan_bot', '', text, flags=re.IGNORECASE).strip()
