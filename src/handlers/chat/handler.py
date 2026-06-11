@@ -443,13 +443,21 @@ async def chat_with_rin(message: Message, by_name: bool = False):
     file_path = await rdb.getdel(PENDING_FILE_KEY)
     attachment = None
     upload_failed = False
+    fallback_link = None
     if file_path:
         attachment = await _upload_doc(message.peer_id, file_path)
         if not attachment:
-            upload_failed = True
+            # ВК отлупил файл (zip/wrong_arch_file и т.п.) — каскад файлохостов и ссылкой
+            from src.handlers.chat.tools import _upload_file_to_hosts
+            fallback_link = await _upload_file_to_hosts(Path(file_path))
+            if not fallback_link:
+                upload_failed = True
 
     r = parse_response(result.final_output)
-    if upload_failed:
+    if fallback_link:
+        r.text = (r.text or "") + f"\n\nвк файл не взял, держи ссылкой: {fallback_link}"
+        await logger.ainfo("Upload fallback на файлохост", path=file_path, link=fallback_link)
+    elif upload_failed:
         r.text = (r.text or "") + "\n\n(чот вк не грузит файл, попробуйте позже)"
         await logger.awarn("Upload failed, добавлено уведомление", path=file_path)
 

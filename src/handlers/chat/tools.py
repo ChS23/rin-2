@@ -334,32 +334,76 @@ async def generate_image(description: str, style: str = "digital art", selfie: b
         return f"Ошибка: {e}"
 
 
-CATBOX_API = "https://catbox.moe/user/api.php"
+async def _upload_file_to_hosts(file_path: Path) -> str | None:
+    """Каскад бесплатных файлохостов (catbox нас блокирует 'Invalid uploader').
+    Все проверены живыми с сервера. Возвращает ссылку с первого сработавшего или None."""
+    try:
+        blob = file_path.read_bytes()
+    except Exception:
+        return None
+    name = file_path.name
+    to = aiohttp.ClientTimeout(total=40)
+
+    async with aiohttp.ClientSession() as s:
+        # 1) litterbox — прямая ссылка, до 72ч (та же семья, что catbox, но нас не режет)
+        try:
+            fd = aiohttp.FormData()
+            fd.add_field("reqtype", "fileupload")
+            fd.add_field("time", "72h")
+            fd.add_field("fileToUpload", blob, filename=name)
+            async with s.post("https://litterbox.catbox.moe/resources/internals/api.php", data=fd, timeout=to) as r:
+                t = (await r.text()).strip()
+                if t.startswith("https://"):
+                    return t
+        except Exception:
+            pass
+        # 2) kappa.lol — прямая ссылка
+        try:
+            fd = aiohttp.FormData()
+            fd.add_field("file", blob, filename=name)
+            async with s.post("https://kappa.lol/api/upload", data=fd, timeout=to) as r:
+                j = await r.json(content_type=None)
+                if isinstance(j, dict) and j.get("link"):
+                    return j["link"]
+        except Exception:
+            pass
+        # 3) gofile — страница-прокладка, зато живёт ~10 дней
+        try:
+            async with s.get("https://api.gofile.io/servers", timeout=to) as r:
+                srv = (await r.json())["data"]["servers"][0]["name"]
+            fd = aiohttp.FormData()
+            fd.add_field("file", blob, filename=name)
+            async with s.post(f"https://{srv}.gofile.io/contents/uploadfile", data=fd, timeout=to) as r:
+                dp = (await r.json(content_type=None)).get("data", {}).get("downloadPage")
+                if dp:
+                    return dp
+        except Exception:
+            pass
+        # 4) tmpfiles — прямая (/dl/), ~1ч — последний резерв
+        try:
+            fd = aiohttp.FormData()
+            fd.add_field("file", blob, filename=name)
+            async with s.post("https://tmpfiles.org/api/v1/upload", data=fd, timeout=to) as r:
+                u = (await r.json(content_type=None)).get("data", {}).get("url")
+                if u:
+                    return u.replace("tmpfiles.org/", "tmpfiles.org/dl/")
+        except Exception:
+            pass
+    return None
 
 
 @function_tool
 async def upload_to_catbox(filename: str) -> str:
-    """Загрузить файл на catbox.moe и получить прямую ссылку. Используй когда ВК не принимает файл.
-    filename — путь относительно папки скриптов."""
+    """Загрузить файл на файлохостинг и получить ссылку. Используй когда ВК не принимает файл (zip, большие и т.п.).
+    filename — путь относительно папки скриптов. Пробует каскад хостов (litterbox/kappa/gofile/tmpfiles)."""
     try:
         file_path = _safe_path(filename)
     except ValueError:
         return "Недопустимый путь файла"
     if not file_path.exists():
         return f"Файл {filename} не найден"
-    try:
-        async with aiohttp.ClientSession() as session:
-            with open(file_path, "rb") as f:
-                data = aiohttp.FormData()
-                data.add_field("reqtype", "fileupload")
-                data.add_field("fileToUpload", f, filename=file_path.name)
-                async with session.post(CATBOX_API, data=data, timeout=aiohttp.ClientTimeout(total=60)) as resp:
-                    url = await resp.text()
-                    if resp.status == 200 and url.startswith("https://"):
-                        return url.strip()
-                    return f"Ошибка catbox: {resp.status} {url[:200]}"
-    except Exception as e:
-        return f"не удалось загрузить на catbox: {e}"
+    url = await _upload_file_to_hosts(file_path)
+    return url or "не удалось загрузить файл ни на один хостинг"
 
 
 all_tools = [web_search, read_url, write_script, edit_file, read_script, list_scripts, send_file, download_file, create_archive, generate_image, upload_to_catbox]
