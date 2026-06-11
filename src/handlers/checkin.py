@@ -19,7 +19,7 @@ from src.utils import run_agent_streamed
 ai_client = AsyncOpenAI(
     api_key=os.getenv("AI_API_KEY"),
     base_url=os.getenv("AI_BASE_URL"),
-    default_headers={"User-Agent": "opencode/1.0"},
+    default_headers={"User-Agent": "rin-2/1.0"},
 )
 ai_model = OpenAIChatCompletionsModel(
     model=os.getenv("AI_MODEL", "gpt-4o"),

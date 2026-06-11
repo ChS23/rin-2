@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fluid-soundfont-gm \
     opus-tools \
     libgl1 \
+    libatomic1 \
     git \
     wget \
     bzip2 \

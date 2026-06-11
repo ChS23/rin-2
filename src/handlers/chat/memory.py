@@ -198,6 +198,7 @@ async def record_message(peer_id: int, from_id: int, text: str, resolve_name):
     if from_id == -GROUP_ID:
         name = "Рин"
         uid_prefix = ""
+        await touch_rin_active()
     else:
         name = await resolve_name(from_id)
         uid_prefix = f"@{from_id} "
@@ -365,5 +366,29 @@ async def get_days_since(user_id: int) -> int | None:
     try:
         last = datetime.date.fromisoformat(raw)
         return (datetime.date.today() - last).days
+    except ValueError:
+        return None
+
+
+# ═══════════════════════════════════════════════════════════
+#              АКТИВНОСТЬ РИН / РАЗРЫВ (Valkey)
+# ═══════════════════════════════════════════════════════════
+
+RIN_LAST_ACTIVE_KEY = "rin:last_active"
+
+
+async def touch_rin_active():
+    """Отметить, что Рин только что проявила активность в чате (написала сообщение)."""
+    await rdb.set(RIN_LAST_ACTIVE_KEY, datetime.datetime.now().isoformat())
+
+
+async def get_rin_gap_days() -> int | None:
+    """Сколько дней Рин не появлялась в чате. None — если отметки ещё нет."""
+    raw = await rdb.get(RIN_LAST_ACTIVE_KEY)
+    if not raw:
+        return None
+    try:
+        last = datetime.datetime.fromisoformat(raw)
+        return (datetime.datetime.now() - last).days
     except ValueError:
         return None

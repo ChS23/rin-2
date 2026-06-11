@@ -25,7 +25,7 @@ from src.handlers.chat.memory import (
     remember_facts, forget_facts, maybe_compress_memory,
     get_user_memory, get_memory_for_participants, extract_participants_from_history,
     get_rin_self_state, refresh_rin_self_state, update_rin_self_state,
-    update_last_seen, get_days_since,
+    update_last_seen, get_days_since, get_rin_gap_days,
 )
 from src.handlers.chat.utils import (
     resolve_user_name, parse_response, get_community_context,
@@ -356,6 +356,7 @@ async def chat_with_rin(message: Message):
     community = get_community_context()
     self_state = await get_rin_self_state()
     days_since = await get_days_since(message.from_id)
+    gap_days = await get_rin_gap_days()
 
     # Фильтруем память — только участники из последних сообщений
     recent_messages = await rdb.lrange(f"rin:chat:{message.peer_id}:history", -30, -1)
@@ -384,6 +385,12 @@ async def chat_with_rin(message: Message):
     # Порядок: ситуация → self → чат → другие → community → user facts → сообщение
     # (user facts и сообщение в конце — recency effect для трансформера)
     prompt_parts = [f"Сейчас: {now.strftime('%d.%m.%Y %H:%M, %A')}. Ты сейчас {mood}."]
+    if gap_days is not None and gap_days >= 3:
+        prompt_parts.append(
+            f"Тебя не было в чате {gap_days} дней — ты надолго выпала из жизни (ноут совсем слёг, закопалась в проект, так бывает). "
+            "История переписки и саммари, которые ты видишь, — это то, что было ДО твоего исчезновения, старые разговоры, а не свежие. "
+            "Вернись как живой человек: можешь по-человечески обыграть, что пропала, но без драмы и без объяснений про технику. Не делай вид, что разговор не прерывался."
+        )
     if self_state:
         prompt_parts.append("Твой текущий прогресс и состояние:\n" + "\n".join(f"- {s}" for s in self_state))
     if context:
