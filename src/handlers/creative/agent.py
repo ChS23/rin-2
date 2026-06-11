@@ -1,4 +1,5 @@
-from agents import Agent, ModelSettings
+import structlog
+from agents import Agent, ModelSettings, RunHooks, Tool, RunConfig
 
 from src.handlers.checkin import ai_model
 from src.handlers.creative.tools import creative_tools
@@ -31,9 +32,26 @@ _review_agent = Agent(
     """,
 )
 
+_review_logger = structlog.get_logger("creative.review")
+
+
+class _ReviewHooks(RunHooks):
+    async def on_tool_start(self, context, agent: Agent, tool: Tool, **kwargs):
+        await _review_logger.ainfo("Review: тул", tool=tool.name)
+
+    async def on_tool_end(self, context, agent: Agent, tool: Tool, result: str, **kwargs):
+        await _review_logger.ainfo("Review: результат", tool=tool.name, result=(result or "")[:200])
+
+
+_review_hooks = _ReviewHooks()
+_review_run_config = RunConfig(tracing_disabled=True)
+
 _review_tool = _review_agent.as_tool(
     tool_name="review_story",
     tool_description="Ревью сцены: анализ диалогов, атмосферы, консистентности персонажей. Передай имя файла для проверки.",
+    hooks=_review_hooks,
+    run_config=_review_run_config,
+    max_turns=20,
 )
 
 creative_agent = Agent(
