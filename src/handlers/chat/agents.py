@@ -86,8 +86,9 @@ RIN_LORE = """
 """
 
 # GLM-5.1: thinking=enabled по умолчанию, требует temperature=1.0
-_glm_heavy = ModelSettings(temperature=1.0, max_tokens=128_000)  # агенты с тулами, сложная логика
-_glm_light = ModelSettings(temperature=1.0, max_tokens=32_000)   # простые ответы без тулов
+_glm_heavy = ModelSettings(temperature=1.0, max_tokens=128_000)  # агенты с тулами, сложная логика (reasoning ВКЛ)
+# Лёгкие агенты — reasoning ВЫКЛ (extra_body): короткий JSON/текст, не нужно думанье → быстро, дёшево, стабильно
+_glm_light = ModelSettings(temperature=1.0, max_tokens=32_000, extra_body={"thinking": {"type": "disabled"}})
 
 from agents import function_tool as _ft  # noqa: E402
 from src.bot import rdb as _rdb  # noqa: E402

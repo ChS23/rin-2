@@ -270,6 +270,8 @@ _vision_client = AsyncOpenAI(
     api_key=os.getenv("AI_API_KEY"),
     base_url=os.getenv("AI_BASE_URL"),
     default_headers={"User-Agent": "rin-2/1.0"},
+    timeout=120.0,
+    max_retries=2,
 )
 VISION_MODEL = os.getenv("AI_VISION_MODEL", "mimo-v2.5")
 

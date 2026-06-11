@@ -20,6 +20,8 @@ ai_client = AsyncOpenAI(
     api_key=os.getenv("AI_API_KEY"),
     base_url=os.getenv("AI_BASE_URL"),
     default_headers={"User-Agent": "rin-2/1.0"},
+    timeout=120.0,      # без таймаута зависший запрос к MiMo морозит бота навсегда
+    max_retries=2,
 )
 ai_model = OpenAIChatCompletionsModel(
     model=os.getenv("AI_MODEL", "gpt-4o"),
@@ -96,7 +98,7 @@ class ReplyToDailyMessage(ABCRule[Message]):
 
 scheduler = AsyncIOScheduler(timezone='Europe/Moscow')
 labeler = BotLabeler()
-_glm_light = ModelSettings(temperature=1.0, max_tokens=32_000)
+_glm_light = ModelSettings(temperature=1.0, max_tokens=32_000, extra_body={"thinking": {"type": "disabled"}})
 
 midday_agent = Agent(
     model=ai_model,

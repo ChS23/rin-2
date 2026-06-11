@@ -386,4 +386,7 @@ audio_agent = Agent(
 audio_tool = audio_agent.as_tool(
     tool_name="compose_music",
     tool_description="Сгенерировать музыку или звуковой эффект. Опиши что нужно: настроение, инструменты, атмосферу. Агент сам подберёт синтез (FAUST/MIDI/numpy), отрендерит, проверит, отмастерит.",
+    hooks=audio_hooks,           # теперь внутренние шаги (synth_faust и т.д.) пишутся в лог
+    run_config=audio_run_config,
+    max_turns=40,                # ограничение цикла — чтобы агент не зависал на MiMo навсегда
 )
