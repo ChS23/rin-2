@@ -184,6 +184,7 @@ async def master_and_export(input_path: str, output_name: str, gain_db: float = 
     audio = await asyncio.to_thread(_read, input_path)
     audio = await master(audio, gain_db)
 
+    os.makedirs(AUDIO_DIR, exist_ok=True)  # папка для экспорта должна существовать, иначе opusenc молча падает
     ogg_path = os.path.join(AUDIO_DIR, f"{output_name}.ogg")
     wav_tmp = input_path
     await save_wav(audio, wav_tmp)
