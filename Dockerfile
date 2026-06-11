@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     opus-tools \
     libgl1 \
     libatomic1 \
+    ffmpeg \
     git \
     wget \
     bzip2 \

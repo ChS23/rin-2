@@ -9,7 +9,7 @@ from agents import function_tool
 
 from src.handlers.chat.tools import (
     SCRIPTS_DIR, _safe_path,
-    compose_midi, POLLINATIONS_URL,
+    POLLINATIONS_URL,
     web_search, read_url,
 )
 
@@ -487,4 +487,3 @@ creative_tools = [
     renpy_lint, renpy_compile, renpy_web_build,
 ]
 
-music_creative_tools = [compose_midi]
