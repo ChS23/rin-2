@@ -33,6 +33,7 @@ logger = structlog.get_logger("audio_engine")
 SR = 44100
 SOUNDFONT = os.getenv("SOUNDFONT", "/usr/share/sounds/sf2/FluidR3_GM.sf2")
 SCRIPTS_DIR = Path(os.getenv("SCRIPTS_DIR", "/app/data/scripts"))
+RENDER_TIMEOUT = 45  # сек — жёсткий потолок на DSP-рендер, чтобы зависший FAUST/код не морозил бота
 
 # DawDreamer может быть недоступен (Python 3.13)
 try:
@@ -40,6 +41,56 @@ try:
     HAS_DAWDREAMER = True
 except ImportError:
     HAS_DAWDREAMER = False
+
+
+# ═══════════════════════════════════════════════════════════
+#      ПРОЦЕССНЫЙ EXECUTOR — изоляция тяжёлых рендеров
+# ═══════════════════════════════════════════════════════════
+# dawdreamer НЕ потокобезопасен: параллельные рендеры в потоках уходят в дедлок,
+# держа GIL → морозят весь event loop бота, и asyncio-таймаут не спасает.
+# Поэтому каждый тяжёлый рендер уходит в ОТДЕЛЬНЫЙ процесс (свой GIL — не морозит
+# бота, + убивается по таймауту). Семафор сериализует: один рендер за раз.
+
+import multiprocessing as _mp
+import queue as _queue
+
+_MP_CTX = _mp.get_context("spawn")   # spawn безопасен с нативными либами + потоками
+_render_sema = asyncio.Semaphore(1)  # один тяжёлый рендер за раз → нет контеншена/дедлока
+
+
+def _render_worker(q, kind: str, code: str, duration: float):
+    """Выполняется в ДОЧЕРНЕМ процессе. Результат (ndarray|str) кладёт в очередь."""
+    try:
+        if kind == "faust":
+            res = _render_faust_sync(code, duration)
+        elif kind == "numpy":
+            res = _render_numpy_sync(code, duration)
+        else:
+            res = f"unknown render kind: {kind}"
+        q.put(res)
+    except Exception as e:
+        q.put(f"{kind} error: {e}")
+
+
+def _run_render_in_process(kind: str, code: str, duration: float, timeout: float):
+    """Рендер в отдельном процессе, прибиваем по таймауту. Блокирующий — звать из to_thread."""
+    q = _MP_CTX.Queue()
+    p = _MP_CTX.Process(target=_render_worker, args=(q, kind, code, duration), daemon=True)
+    p.start()
+    try:
+        # q.get с таймаутом заодно дренирует pipe → нет классического deadlock на join
+        result = q.get(timeout=timeout)
+    except _queue.Empty:
+        result = (f"{kind} error: рендер завис (>{int(timeout)}с) и был прибит — нестабильный DSP "
+                  "(feedback>=1.0, деление на 0, рекурсия) или бесконечный цикл. Упрости код.")
+    finally:
+        if p.is_alive():
+            p.terminate()
+            p.join(3)
+            if p.is_alive():
+                p.kill()
+        p.join(1)
+    return result
 
 
 # ═══════════════════════════════════════════════════════════
@@ -70,11 +121,14 @@ def _render_faust_sync(code: str, duration: float) -> np.ndarray | str:
 
 
 async def render_faust(code: str, duration: float = 30.0) -> np.ndarray | str:
-    """Скомпилировать FAUST DSP код и отрендерить аудио (non-blocking)."""
-    result = await asyncio.to_thread(_render_faust_sync, code, duration)
+    """FAUST → аудио. Рендер изолирован в отдельном процессе (не морозит бота) + таймаут."""
+    async with _render_sema:  # один рендер за раз — dawdreamer не любит параллель
+        result = await asyncio.to_thread(_run_render_in_process, "faust", code, duration, RENDER_TIMEOUT)
     if isinstance(result, np.ndarray):
         await logger.ainfo("FAUST rendered", duration=duration, shape=result.shape,
                            peak=float(np.max(np.abs(result))))
+    else:
+        await logger.awarn("FAUST render failed", reason=str(result)[:120])
     return result
 
 
@@ -152,7 +206,12 @@ async def render_midi(tracks_json: str, bpm: int = 60, duration: float = 30.0) -
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
-        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
+        try:
+            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await logger.awarn("FluidSynth render timeout")
+            return "FluidSynth error: рендер завис (>60с) и был прерван"
 
         if not os.path.exists(wav_path):
             return f"FluidSynth error: {stderr.decode()[:300]}"
@@ -186,8 +245,9 @@ def _render_numpy_sync(code: str, duration: float) -> np.ndarray | str:
 
 
 async def render_numpy(code: str, duration: float = 30.0) -> np.ndarray | str:
-    """Выполнить Python/numpy код для генерации аудио (non-blocking)."""
-    return await asyncio.to_thread(_render_numpy_sync, code, duration)
+    """numpy → аудио. Изолировано в процессе + таймаут (защита от бесконечного цикла в exec)."""
+    async with _render_sema:
+        return await asyncio.to_thread(_run_render_in_process, "numpy", code, duration, RENDER_TIMEOUT)
 
 
 # ══════════════════════════════════════════════════════��════

@@ -37,7 +37,11 @@ audio_agent = Agent(
     model=ai_model,
     name="Audio Agent",
     tools=audio_tools,
-    model_settings=ModelSettings(temperature=1.0, max_tokens=128_000),
+    model_settings=ModelSettings(
+        temperature=1.0, max_tokens=128_000,
+        parallel_tool_calls=False,                      # слои последовательно — никакого шторма рендеров
+        extra_body={"thinking": {"type": "disabled"}},  # reasoning OFF → шаги быстрее
+    ),
     instructions="""
     Ты -- опытный саунд-дизайнер и DSP-инженер. Превращаешь текстовые описания в атмосферное аудио.
     Ты не просто генерируешь код -- ты проверяешь результат через check_audio и переделываешь пока не станет хорошо.
