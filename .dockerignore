@@ -1,0 +1,24 @@
+# Секреты/конфиг НЕ должны попадать в образ — иначе вшитый .env перетирает
+# окружение от compose (load_dotenv(override=True) в src/config/settings.py).
+# Прод-конфиг приходит только через compose env_file.
+.env
+.env.*
+!.env.example
+
+# git / мусор сборки
+.git
+.gitignore
+.dockerignore
+
+# питон-кеши и локальное окружение
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# прочее
+*.log
+.DS_Store
