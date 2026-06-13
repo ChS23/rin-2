@@ -1,6 +1,5 @@
 import asyncio
 import re
-import urllib.parse
 
 import aiofiles
 import aiohttp
@@ -9,7 +8,7 @@ from agents import function_tool
 
 from src.handlers.chat.tools import (
     SCRIPTS_DIR, _safe_path,
-    POLLINATIONS_URL,
+    _generate_image_cascade,
     web_search, read_url,
 )
 
@@ -358,29 +357,18 @@ async def create_image(description: str, style: str = "digital art", filename: s
         file_path = file_path.with_suffix(".png")
 
     raw_prompt = f"{style} style, {description}"
-    encoded = urllib.parse.quote(raw_prompt)
-    url = POLLINATIONS_URL.format(prompt=encoded)
-    full_url = f"{url}?width=1024&height=1024&nologo=true&enhance=true&safe=true"
-
     file_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(full_url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
-                if resp.status != 200:
-                    return f"Ошибка генерации: HTTP {resp.status}"
-                data = await resp.read()
-                if len(data) < 1000:
-                    return "Получена пустая картинка"
-        async with aiofiles.open(file_path, "wb") as f:
-            await f.write(data)
-        rel = file_path.relative_to(SCRIPTS_DIR)
-        size_kb = len(data) // 1024
-        await logger.ainfo("Creative: картинка создана", filename=str(rel), size_kb=size_kb)
-        return f"Картинка {rel} сохранена ({size_kb} KB)"
-    except asyncio.TimeoutError:
-        return "Таймаут генерации (>60с)"
-    except Exception as e:
-        return f"Ошибка: {e}"
+
+    data = await _generate_image_cascade(raw_prompt)
+    if not data:
+        return "Все провайдеры генерации недоступны"
+
+    async with aiofiles.open(file_path, "wb") as f:
+        await f.write(data)
+    rel = file_path.relative_to(SCRIPTS_DIR)
+    size_kb = len(data) // 1024
+    await logger.ainfo("Creative: картинка создана", filename=str(rel), size_kb=size_kb)
+    return f"Картинка {rel} сохранена ({size_kb} KB)"
 
 
 # ═══════════════════════════════════════════════════════════

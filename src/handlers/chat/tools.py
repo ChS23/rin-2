@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import os
 import re
 import urllib.parse
@@ -280,6 +281,203 @@ RIN_APPEARANCE = (
 )
 
 
+async def _generate_image_cascade(prompt: str, width: int = 1024, height: int = 1024) -> bytes | None:
+    """Каскад провайдеров генерации картинок. Возвращает байты PNG/JPEG или None если все упали.
+
+    Порядок попыток:
+      1. Pollinations.ai       — без ключа (быстрый зонд, вернёт 402 если платный)
+      2. HuggingFace FLUX.1-schnell  — HF_TOKEN (бесплатный на huggingface.co)
+      3. fal.ai flux/schnell         — FAL_KEY ($20 при регистрации)
+      4. Together.ai FLUX.1-schnell  — TOGETHER_API_KEY (платный)
+      5. Replicate FLUX schnell      — REPLICATE_API_TOKEN (~50 бесплатных, потом платный)
+      6. Fireworks AI flux-schnell   — FIREWORKS_API_KEY ($1 при регистрации)
+      7. Stability AI core           — STABILITY_API_KEY (25 бесплатных кредитов)
+    """
+    encoded = urllib.parse.quote(prompt)
+    timeout = aiohttp.ClientTimeout(total=90)
+    timeout_probe = aiohttp.ClientTimeout(total=8)  # для быстрых зондов
+
+    async with aiohttp.ClientSession() as session:
+        # 1) Pollinations.ai — бесплатный до июня 2026; оставляем зондом на случай возврата
+        for model in ("flux", "turbo"):
+            url = (
+                f"https://image.pollinations.ai/prompt/{encoded}"
+                f"?model={model}&width={width}&height={height}&nologo=true&safe=true"
+            )
+            try:
+                async with session.get(url, timeout=timeout_probe) as resp:
+                    if resp.status == 200:
+                        data = await resp.read()
+                        if len(data) > 1000:
+                            await logger.ainfo("Image OK", provider=f"pollinations/{model}")
+                            return data
+                    # 402 = x402-micropayment, пропускаем без лога
+            except Exception:
+                pass
+
+        # 2) HuggingFace Inference API — FLUX.1-schnell
+        #    Бесплатный токен: huggingface.co → Settings → Access Tokens
+        hf_token = os.getenv("HF_TOKEN")
+        if hf_token:
+            try:
+                async with session.post(
+                    "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell",
+                    headers={"Authorization": f"Bearer {hf_token}"},
+                    json={"inputs": prompt, "parameters": {"width": width, "height": height}},
+                    timeout=timeout,
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.read()
+                        if len(data) > 1000:
+                            await logger.ainfo("Image OK", provider="hf/flux-schnell")
+                            return data
+                    await logger.awarn("Image skip", provider="hf/flux-schnell", status=resp.status)
+            except Exception as e:
+                await logger.awarn("Image error", provider="hf/flux-schnell", error=str(e))
+
+        # 3) fal.ai — flux/schnell (sync_mode)
+        #    Ключ: fal.ai → Dashboard → API Keys
+        fal_key = os.getenv("FAL_KEY")
+        if fal_key:
+            try:
+                async with session.post(
+                    "https://fal.run/fal-ai/flux/schnell",
+                    headers={"Authorization": f"Key {fal_key}"},
+                    json={
+                        "prompt": prompt,
+                        "image_size": {"width": width, "height": height},
+                        "num_images": 1,
+                        "sync_mode": True,
+                    },
+                    timeout=timeout,
+                ) as resp:
+                    if resp.status == 200:
+                        j = await resp.json(content_type=None)
+                        img_url = (j.get("images") or [{}])[0].get("url")
+                        if img_url:
+                            async with session.get(img_url, timeout=timeout) as img_resp:
+                                if img_resp.status == 200:
+                                    data = await img_resp.read()
+                                    if len(data) > 1000:
+                                        await logger.ainfo("Image OK", provider="fal/flux-schnell")
+                                        return data
+                    await logger.awarn("Image skip", provider="fal/flux-schnell", status=resp.status)
+            except Exception as e:
+                await logger.awarn("Image error", provider="fal/flux-schnell", error=str(e))
+
+        # 4) Together.ai — FLUX.1-schnell (платный, без Free-суффикса — тот модель убрали)
+        #    Ключ: api.together.ai
+        together_key = os.getenv("TOGETHER_API_KEY")
+        if together_key:
+            try:
+                async with session.post(
+                    "https://api.together.xyz/v1/images/generations",
+                    headers={"Authorization": f"Bearer {together_key}"},
+                    json={
+                        "model": "black-forest-labs/FLUX.1-schnell",
+                        "prompt": prompt,
+                        "width": width,
+                        "height": height,
+                        "n": 1,
+                        "response_format": "base64",
+                    },
+                    timeout=timeout,
+                ) as resp:
+                    if resp.status == 200:
+                        j = await resp.json(content_type=None)
+                        b64 = (j.get("data") or [{}])[0].get("b64_json")
+                        if b64:
+                            data = base64.b64decode(b64)
+                            if len(data) > 1000:
+                                await logger.ainfo("Image OK", provider="together/flux-schnell")
+                                return data
+                    await logger.awarn("Image skip", provider="together/flux-schnell", status=resp.status)
+            except Exception as e:
+                await logger.awarn("Image error", provider="together/flux-schnell", error=str(e))
+
+        # 5) Replicate — FLUX schnell (Prefer: wait = синхронно)
+        #    Ключ: replicate.com → Account Settings → API tokens
+        replicate_key = os.getenv("REPLICATE_API_TOKEN")
+        if replicate_key:
+            try:
+                async with session.post(
+                    "https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions",
+                    headers={
+                        "Authorization": f"Bearer {replicate_key}",
+                        "Prefer": "wait",
+                    },
+                    json={"input": {"prompt": prompt, "aspect_ratio": "1:1", "output_format": "png", "num_outputs": 1}},
+                    timeout=timeout,
+                ) as resp:
+                    if resp.status in (200, 201):
+                        j = await resp.json(content_type=None)
+                        output = j.get("output") or []
+                        img_url = output[0] if output else None
+                        if img_url:
+                            async with session.get(
+                                img_url,
+                                headers={"Authorization": f"Bearer {replicate_key}"},
+                                timeout=timeout,
+                            ) as img_resp:
+                                if img_resp.status == 200:
+                                    data = await img_resp.read()
+                                    if len(data) > 1000:
+                                        await logger.ainfo("Image OK", provider="replicate/flux-schnell")
+                                        return data
+                    await logger.awarn("Image skip", provider="replicate/flux-schnell", status=resp.status)
+            except Exception as e:
+                await logger.awarn("Image error", provider="replicate/flux-schnell", error=str(e))
+
+        # 6) Fireworks AI — flux-1-schnell-fp8 (Accept: image/png = сырые байты)
+        #    Ключ: fireworks.ai → API Keys
+        fireworks_key = os.getenv("FIREWORKS_API_KEY")
+        if fireworks_key:
+            try:
+                async with session.post(
+                    "https://api.fireworks.ai/inference/v1/workflows/accounts/fireworks/models/flux-1-schnell-fp8/text_to_image",
+                    headers={
+                        "Authorization": f"Bearer {fireworks_key}",
+                        "Accept": "image/png",
+                    },
+                    json={"prompt": prompt, "aspect_ratio": "1:1"},
+                    timeout=timeout,
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.read()
+                        if len(data) > 1000:
+                            await logger.ainfo("Image OK", provider="fireworks/flux-schnell")
+                            return data
+                    await logger.awarn("Image skip", provider="fireworks/flux-schnell", status=resp.status)
+            except Exception as e:
+                await logger.awarn("Image error", provider="fireworks/flux-schnell", error=str(e))
+
+        # 7) Stability AI — stable-image/generate/core (Accept: image/* = сырые байты)
+        #    Ключ: platform.stability.ai → API Keys
+        stability_key = os.getenv("STABILITY_API_KEY")
+        if stability_key:
+            try:
+                form = aiohttp.FormData()
+                form.add_field("prompt", prompt)
+                form.add_field("aspect_ratio", "1:1")
+                form.add_field("output_format", "png")
+                async with session.post(
+                    "https://api.stability.ai/v2beta/stable-image/generate/core",
+                    headers={"Authorization": f"Bearer {stability_key}", "Accept": "image/*"},
+                    data=form,
+                    timeout=timeout,
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.read()
+                        if len(data) > 1000:
+                            await logger.ainfo("Image OK", provider="stability/core")
+                            return data
+                    await logger.awarn("Image skip", provider="stability/core", status=resp.status)
+            except Exception as e:
+                await logger.awarn("Image error", provider="stability/core", error=str(e))
+
+    return None
+
+
 @function_tool
 async def generate_image(description: str, style: str = "digital art", selfie: bool = False, filename: str = "") -> str:
     """Сгенерировать картинку по описанию и прикрепить к ответу.
@@ -288,16 +486,10 @@ async def generate_image(description: str, style: str = "digital art", selfie: b
     selfie — если True, на картинке будешь ты (Рин). Используй когда просят фото/селфи/как ты выглядишь.
     filename — путь для сохранения, например 'chastota/game/images/bg_station_night.png'. Если пусто — автоимя.
     Промпт будет автоматически улучшен для лучшего результата."""
-    # Если селфи — подмешиваем фиксированную внешность Рин
     if selfie:
         raw_prompt = f"{style} style, {RIN_APPEARANCE}, {description}"
     else:
         raw_prompt = f"{style} style, {description}"
-    encoded = urllib.parse.quote(raw_prompt)
-
-    url = POLLINATIONS_URL.format(prompt=encoded)
-    params = "width=1024&height=1024&nologo=true&enhance=true&safe=true"
-    full_url = f"{url}?{params}"
 
     if filename:
         try:
@@ -311,27 +503,18 @@ async def generate_image(description: str, style: str = "digital art", selfie: b
         file_path = SCRIPTS_DIR / f"{safe_name}.png"
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(full_url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
-                if resp.status != 200:
-                    return f"Ошибка генерации: HTTP {resp.status}"
-                data = await resp.read()
-                if len(data) < 1000:
-                    return "Получена пустая или слишком маленькая картинка"
+    data = await _generate_image_cascade(raw_prompt)
+    if not data:
+        return "Все провайдеры генерации недоступны, попробуй позже"
 
-        async with aiofiles.open(file_path, "wb") as f:
-            await f.write(data)
+    async with aiofiles.open(file_path, "wb") as f:
+        await f.write(data)
 
-        size_kb = len(data) // 1024
-        rel = file_path.relative_to(SCRIPTS_DIR)
-        await rdb.set(PENDING_FILE_KEY, str(file_path), ex=300)
-        await logger.ainfo("Картинка сгенерирована", filename=str(rel), size_kb=size_kb, style=style)
-        return f"Картинка {rel} готова ({size_kb} KB)"
-    except asyncio.TimeoutError:
-        return "Таймаут генерации картинки (>60с)"
-    except Exception as e:
-        return f"Ошибка: {e}"
+    size_kb = len(data) // 1024
+    rel = file_path.relative_to(SCRIPTS_DIR)
+    await rdb.set(PENDING_FILE_KEY, str(file_path), ex=300)
+    await logger.ainfo("Картинка сгенерирована", filename=str(rel), size_kb=size_kb, style=style)
+    return f"Картинка {rel} готова ({size_kb} KB)"
 
 
 async def _upload_file_to_hosts(file_path: Path) -> str | None:
