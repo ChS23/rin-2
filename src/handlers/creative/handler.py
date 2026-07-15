@@ -224,19 +224,37 @@ async def check_creative_trigger():
         await run_forced_session(task)
 
 
-# Расписание: ночью 0:00, 2:00, 4:00 — без проверок, просто работаем
+PAUSE_KEY = "rin:creative:paused"
+
+
+async def _creative_paused() -> bool:
+    """Ночные творческие сессии на паузе (напр. игра готова) — флаг в Valkey.
+    Снять/возобновить: DEL rin:creative:paused. Триггер из чата (work_on_chastota) НЕ блокируется."""
+    return bool(await rdb.exists(PAUSE_KEY))
+
+
+# Расписание: ночью 0:00, 2:00, 4:00. Пропускаются, если выставлена пауза (rin:creative:paused).
 @scheduler.scheduled_job(trigger="cron", hour=0, minute=0)
 async def creative_session_night_1():
+    if await _creative_paused():
+        await logger.ainfo("Creative: ночная сессия пропущена — пауза (rin:creative:paused)")
+        return
     await run_forced_session()
 
 
 @scheduler.scheduled_job(trigger="cron", hour=2, minute=0)
 async def creative_session_night_2():
+    if await _creative_paused():
+        await logger.ainfo("Creative: ночная сессия пропущена — пауза")
+        return
     await run_forced_session()
 
 
 @scheduler.scheduled_job(trigger="cron", hour=4, minute=0)
 async def creative_session_night_3():
+    if await _creative_paused():
+        await logger.ainfo("Creative: ночная сессия пропущена — пауза")
+        return
     await run_forced_session()
 
 
