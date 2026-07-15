@@ -82,6 +82,15 @@ def get_all_memory_summary() -> str:
     return "\n".join(lines)
 
 
+def _fmt_entry(entry: dict) -> str:
+    """Строка о человеке для промпта: живая мысль-рефлексия (если есть) + факты."""
+    facts = "; ".join(entry.get("facts", [])[:5])
+    refl = entry.get("reflection")
+    if refl:
+        return f"{entry['name']} — {refl}\n    (факты: {facts})"
+    return f"{entry['name']}: {facts}"
+
+
 def get_memory_for_ids(user_ids: set[str], exclude_uid: int | None = None) -> str:
     """Вернуть факты только о людях из user_ids (участники чата)."""
     memory = load_memory()
@@ -93,7 +102,7 @@ def get_memory_for_ids(user_ids: set[str], exclude_uid: int | None = None) -> st
         if uid == exclude:
             continue
         if uid in user_ids and entry.get("facts"):
-            lines.append(f"{entry['name']}: {'; '.join(entry['facts'][:5])}")
+            lines.append(_fmt_entry(entry))
     return "\n".join(lines)
 
 
@@ -130,7 +139,7 @@ def get_memory_for_participants(user_ids: set[str], names: set[str], exclude_uid
         if uid == exclude:
             continue
         if uid in user_ids and entry.get("facts"):
-            lines.append(f"{entry['name']}: {'; '.join(entry['facts'][:5])}")
+            lines.append(_fmt_entry(entry))
             seen.add(entry["name"])
     # Потом fallback по имени (старые записи без id)
     if names:
@@ -138,8 +147,37 @@ def get_memory_for_participants(user_ids: set[str], names: set[str], exclude_uid
             if uid == exclude or entry["name"] in seen:
                 continue
             if entry["name"] in names and entry.get("facts"):
-                lines.append(f"{entry['name']}: {'; '.join(entry['facts'][:5])}")
+                lines.append(_fmt_entry(entry))
     return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════════
+#             РЕФЛЕКСИЯ — КАК РИН ВИДИТ ЧЕЛОВЕКА
+# ═══════════════════════════════════════════════════════════
+async def refresh_all_reflections():
+    """Пересобрать 'как Рин видит человека' (одна живая мысль) для всех, у кого ≥3 фактов."""
+    from src.handlers.chat.agents import reflection_agent
+    memory = load_memory()
+    updated = 0
+    for uid, entry in list(memory.items()):
+        facts = entry.get("facts") or []
+        if len(facts) < 3:
+            continue
+        prompt = f"Человек: {entry['name']}\nФакты о нём:\n" + "\n".join(f"- {f}" for f in facts)
+        try:
+            async with ai_lock:
+                result = await run_agent_streamed(reflection_agent, prompt)
+            text = (result.final_output or "").strip().strip('"').strip()
+            if text:
+                async with _memory_lock:
+                    m = load_memory()
+                    if uid in m:
+                        m[uid]["reflection"] = text[:300]
+                        save_memory(m)
+                updated += 1
+        except Exception as e:
+            await logger.awarn("Не удалось сделать рефлексию", uid=uid, error=str(e))
+    await logger.ainfo("Рефлексии обновлены", count=updated)
 
 
 # ═══════════════════════════════════════════════════════════

@@ -26,7 +26,7 @@ from src.handlers.chat.memory import (
     get_user_memory, get_memory_for_participants, extract_participants_from_history,
     get_rin_self_state, refresh_rin_self_state, update_rin_self_state,
     update_last_seen, get_days_since, get_rin_gap_days,
-    add_episode, get_episodes,
+    add_episode, get_episodes, refresh_all_reflections,
 )
 from src.handlers.chat.utils import (
     resolve_user_name, parse_response, get_community_context,
@@ -536,6 +536,15 @@ async def chat_with_rin(message: Message, by_name: bool = False):
 # ═══════════════════════════════════════════════════════════
 #                    РИН ИНИЦИИРУЕТ
 # ═══════════════════════════════════════════════════════════
+
+@scheduler.scheduled_job(trigger="cron", hour=3, minute=30)
+async def rin_reflect_job():
+    """Пересобирает 'как Рин видит людей' (живая мысль) — ночью, до self_state"""
+    try:
+        await refresh_all_reflections()
+    except Exception as e:
+        await logger.awarn("Не удалось обновить рефлексии", error=str(e))
+
 
 @scheduler.scheduled_job(trigger="cron", hour=4, minute=0)
 async def rin_self_state_update():
