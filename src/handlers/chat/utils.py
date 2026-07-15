@@ -59,6 +59,28 @@ async def resolve_user_name(user_id: int) -> str:
         return "???"
 
 
+_REFUSAL_MARKERS = (
+    "rejected", "high risk", "considered high", "cannot assist", "i cannot",
+    "i'm unable", "i am unable", "as an ai", "content policy", "unable to help",
+    "was flagged", "i can't help", "against my guidelines", "cannot comply",
+)
+
+
+def _looks_like_refusal(text: str) -> bool:
+    """Похоже на отказ/ошибку провайдера, а не на ответ Рин — тогда лучше промолчать, чем выводить сырьё в чат."""
+    t = (text or "").lower().strip()
+    if not t:
+        return False
+    if any(m in t for m in _REFUSAL_MARKERS):
+        return True
+    letters = [c for c in t if c.isalpha()]
+    if len(letters) >= 12:
+        cyr = sum(1 for c in letters if "а" <= c <= "я" or c == "ё")
+        if cyr / len(letters) < 0.3:  # Рин пишет по-русски; почти без кириллицы = не она
+            return True
+    return False
+
+
 def parse_response(raw) -> RinResponse:
     if isinstance(raw, RinResponse):
         return raw
@@ -115,7 +137,11 @@ def parse_response(raw) -> RinResponse:
         )
 
     clean = re.sub(r'\{[^{}]*"text"\s*:.*\}\s*$', '', raw, flags=re.DOTALL).strip()
-    return RinResponse(text=clean or raw)
+    candidate = clean or raw
+    if _looks_like_refusal(candidate):
+        logger.warning("Ответ похож на отказ/ошибку провайдера — молчим", preview=candidate[:120])
+        return RinResponse(text="")
+    return RinResponse(text=candidate)
 
 
 def get_community_context() -> str:
