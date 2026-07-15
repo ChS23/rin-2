@@ -362,7 +362,7 @@ async def chat_with_rin(message: Message, by_name: bool = False):
 
     user_name = await resolve_user_name(message.from_id)
 
-    now = datetime.datetime.now()
+    now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=3)))  # МСК (UTC+3) явно, не наивное серверное время
     context = await get_context(message.peer_id)
     user_facts = get_user_memory(message.from_id)
     community = get_community_context()
@@ -550,7 +550,7 @@ async def rin_initiative():
     chat_ids, chat_names = extract_participants_from_history(recent)
     relevant_memory = get_memory_for_participants(chat_ids, chat_names)
 
-    prompt_parts = [f"Текущий день: {datetime.datetime.now().strftime('%d.%m.%Y %A')}"]
+    prompt_parts = [f"Текущий день: {datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=3))).strftime('%d.%m.%Y %A')}"]
     self_state_personal = [s for s in self_state if not s.startswith("[creative]")]
     if self_state_personal:
         prompt_parts.append("Твоё состояние и настроение (фон для тебя, НЕ зачитывай списком):\n" + "\n".join(f"- {s}" for s in self_state_personal))
