@@ -26,6 +26,7 @@ from src.handlers.chat.memory import (
     get_user_memory, get_memory_for_participants, extract_participants_from_history,
     get_rin_self_state, refresh_rin_self_state, update_rin_self_state,
     update_last_seen, get_days_since, get_rin_gap_days,
+    add_episode, get_episodes,
 )
 from src.handlers.chat.utils import (
     resolve_user_name, parse_response, get_community_context,
@@ -369,6 +370,7 @@ async def chat_with_rin(message: Message, by_name: bool = False):
     self_state = await get_rin_self_state()
     days_since = await get_days_since(message.from_id)
     gap_days = await get_rin_gap_days()
+    episodes = await get_episodes()
 
     # Фильтруем память — только участники из последних сообщений
     recent_messages = await rdb.lrange(f"rin:chat:{message.peer_id}:history", -30, -1)
@@ -412,6 +414,8 @@ async def chat_with_rin(message: Message, by_name: bool = False):
         prompt_parts.append(f"Что ты помнишь об участниках разговора:\n{relevant_memory}")
     if community:
         prompt_parts.append(f"Инфо о сообществе:\n{community}")
+    if episodes:
+        prompt_parts.append("Ваши реальные внутряки (можешь ненавязчиво сослаться к месту; НЕ выдумывай новых):\n" + "\n".join(f"- {e}" for e in episodes))
     # User facts ближе к сообщению — важнее всего для ответа
     if user_facts:
         user_ctx = f"Что ты помнишь о {user_name}:\n" + "\n".join(f"- {f}" for f in user_facts)
@@ -514,6 +518,8 @@ async def chat_with_rin(message: Message, by_name: bool = False):
         current = await get_rin_self_state()
         merged = current + [s for s in r.self_update if s not in current]
         await update_rin_self_state(merged)
+    if r.episode:
+        await add_episode(r.episode)
 
     await update_last_seen(message.from_id)
 

@@ -142,6 +142,30 @@ def get_memory_for_participants(user_ids: set[str], names: set[str], exclude_uid
     return "\n".join(lines)
 
 
+# ═══════════════════════════════════════════════════════════
+#                 ЭПИЗОДЫ / ВНУТРЯКИ (Valkey)
+# ═══════════════════════════════════════════════════════════
+EPISODES_KEY = "rin:episodes"
+EPISODES_MAX = 20
+
+
+async def add_episode(text: str):
+    """Запомнить памятный/смешной момент из чата (внутряк) — одной строкой от первого лица."""
+    text = (text or "").strip()
+    if not text:
+        return
+    existing = await rdb.lrange(EPISODES_KEY, 0, -1)
+    if text in existing:  # не дублировать точь-в-точь
+        return
+    await rdb.rpush(EPISODES_KEY, text)
+    await rdb.ltrim(EPISODES_KEY, -EPISODES_MAX, -1)
+
+
+async def get_episodes(n: int = 6) -> list[str]:
+    """Последние n внутряков для подмешивания в промпт."""
+    return await rdb.lrange(EPISODES_KEY, -n, -1)
+
+
 async def _compress_facts(user_name: str, facts: list[str]) -> list[str]:
     try:
         prompt = f"Факты о {user_name}:\n" + "\n".join(f"- {f}" for f in facts)

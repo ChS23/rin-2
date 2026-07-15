@@ -20,8 +20,9 @@ class RinResponse(BaseModel):
     remember: list[str] | None = None
     forget: list[str] | None = None
     self_update: list[str] | None = None
+    episode: str | None = None
 
-    @field_validator("reaction", mode="before")
+    @field_validator("reaction", "episode", mode="before")
     @classmethod
     def coerce_reaction(cls, v):
         if v is None or v == "null" or v == "none" or v == "":
@@ -75,6 +76,7 @@ def parse_response(raw) -> RinResponse:
             remember=data.get("remember"),
             forget=data.get("forget"),
             self_update=data.get("self_update"),
+            episode=data.get("episode"),
         )
     except (orjson.JSONDecodeError, AttributeError):
         pass
