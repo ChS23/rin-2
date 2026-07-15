@@ -38,9 +38,9 @@ audio_agent = Agent(
     name="Audio Agent",
     tools=audio_tools,
     model_settings=ModelSettings(
-        temperature=1.0, max_tokens=128_000,
+        temperature=1.0, top_p=0.95, max_tokens=128_000,
         parallel_tool_calls=False,                      # слои последовательно — никакого шторма рендеров
-        extra_body={"thinking": {"type": "disabled"}},  # reasoning OFF → шаги быстрее
+        extra_body={"chat_template_kwargs": {"enable_thinking": False}},  # reasoning OFF (MiMo-формат) → шаги быстрее
     ),
     instructions="""
     Ты -- опытный саунд-дизайнер и DSP-инженер. Превращаешь текстовые описания в атмосферное аудио.

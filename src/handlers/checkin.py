@@ -98,7 +98,8 @@ class ReplyToDailyMessage(ABCRule[Message]):
 
 scheduler = AsyncIOScheduler(timezone='Europe/Moscow')
 labeler = BotLabeler()
-_glm_light = ModelSettings(temperature=1.0, max_tokens=32_000, extra_body={"thinking": {"type": "disabled"}})
+# MiMo: reasoning ВЫКЛ через chat_template_kwargs.enable_thinking=false + рекоменд. top_p=0.95
+_glm_light = ModelSettings(temperature=1.0, top_p=0.95, max_tokens=32_000, extra_body={"chat_template_kwargs": {"enable_thinking": False}})
 
 midday_agent = Agent(
     model=ai_model,

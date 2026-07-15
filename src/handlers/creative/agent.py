@@ -9,7 +9,7 @@ _review_agent = Agent(
     model=ai_model,
     name="Рин (ревью сценария)",
     tools=[creative_tools[0], creative_tools[4]],  # read_file, grep_files
-    model_settings=ModelSettings(temperature=1.0, max_tokens=128_000),
+    model_settings=ModelSettings(temperature=1.0, top_p=0.95, max_tokens=128_000),
     instructions="""
     Ты — ревьюер сценария визуальной новеллы "Частота". Тебе передают файл или фрагмент сцены для анализа.
 
@@ -58,7 +58,7 @@ creative_agent = Agent(
     model=ai_model,
     name="Рин (creative)",
     tools=creative_tools + [audio_tool, _review_tool],
-    model_settings=ModelSettings(temperature=1.0, max_tokens=128_000),
+    model_settings=ModelSettings(temperature=1.0, top_p=0.95, max_tokens=128_000),
     instructions="""
     Ты — автономный агент-разработчик визуальной новеллы "Частота" на движке Ren'Py.
     Работаешь в автоматических сессиях. Между сессиями памяти нет — весь прогресс хранится только в файлах проекта и ROADMAP.md.

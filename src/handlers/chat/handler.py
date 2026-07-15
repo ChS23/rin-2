@@ -399,12 +399,13 @@ async def chat_with_rin(message: Message, by_name: bool = False):
     prompt_parts = [f"Сейчас: {now.strftime('%d.%m.%Y %H:%M, %A')}. Ты сейчас {mood}."]
     if gap_days is not None and gap_days >= 3:
         prompt_parts.append(
-            f"Тебя не было в чате {gap_days} дней — ты надолго выпала из жизни (ноут совсем слёг, закопалась в проект, так бывает). "
+            f"Тебя не было в чате {gap_days} дней — просто выпала на время, так бывает. "
             "История переписки и саммари, которые ты видишь, — это то, что было ДО твоего исчезновения, старые разговоры, а не свежие. "
-            "Вернись как живой человек: можешь по-человечески обыграть, что пропала, но без драмы и без объяснений про технику. Не делай вид, что разговор не прерывался."
+            "Вернись легко, как живой человек. НЕ придумывай причин, почему пропала (никаких сдохших ноутов, отключений света, разъездов, стажировок) и не оправдывайся — если не спросят, тему вообще не поднимай. Просто снова тут. Не делай вид, что разговор не прерывался."
         )
-    if self_state:
-        prompt_parts.append("Твой текущий прогресс и состояние:\n" + "\n".join(f"- {s}" for s in self_state))
+    self_state_personal = [s for s in self_state if not s.startswith("[creative]")]
+    if self_state_personal:
+        prompt_parts.append("Твоё состояние и настроение (фон для тебя, НЕ зачитывай списком):\n" + "\n".join(f"- {s}" for s in self_state_personal))
     if context:
         prompt_parts.append(context)
     if relevant_memory:
@@ -550,8 +551,9 @@ async def rin_initiative():
     relevant_memory = get_memory_for_participants(chat_ids, chat_names)
 
     prompt_parts = [f"Текущий день: {datetime.datetime.now().strftime('%d.%m.%Y %A')}"]
-    if self_state:
-        prompt_parts.append("Твой текущий прогресс и состояние:\n" + "\n".join(f"- {s}" for s in self_state))
+    self_state_personal = [s for s in self_state if not s.startswith("[creative]")]
+    if self_state_personal:
+        prompt_parts.append("Твоё состояние и настроение (фон для тебя, НЕ зачитывай списком):\n" + "\n".join(f"- {s}" for s in self_state_personal))
     if relevant_memory:
         prompt_parts.append(f"Что ты помнишь об участниках:\n{relevant_memory}")
     if context:
