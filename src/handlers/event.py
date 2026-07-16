@@ -171,18 +171,27 @@ async def help_board_button(message: Message):
 
 @labeler.chat_message(ChatActionRule(chat_action_types=["chat_invite_user", "chat_invite_user_by_link"]))
 async def invite_event_handler(message: Message):
-    users = await api.users.get(user_ids=message.from_id)
-    # Добро пожаловать в беседу, @id{} ({}) . \n Посмотри закреп и чувствуй себя как дома^^
-    welcome_message = ""
-    if message.from_id:
-        welcome_message = (
-            "Добро пожаловать в беседу "
-            f"@id{message.from_id} ({users[0].first_name} {users[0].last_name})"
-            "\n Посмотри закреп и чувствуй себя как дома^^"
-        )
-    else:
-        welcome_message = "Добро пожаловать в беседу\nПосмотри закреп и чувствуй себя как дома^^"
-        
+    # Приветствовать нужно ПРИГЛАШЁННОГО. Для chat_invite_user это action.member_id
+    # (from_id — это тот, кто пригласил). Для входа по ссылке member_id == from_id.
+    member_id = None
+    if message.action and message.action.member_id:
+        member_id = message.action.member_id
+    if not member_id:
+        member_id = message.from_id
+
+    welcome_message = "Добро пожаловать в беседу\nПосмотри закреп и чувствуй себя как дома^^"
+    if member_id and member_id > 0:  # >0 — это человек, а не сообщество
+        try:
+            users = await api.users.get(user_ids=member_id)
+            if users:
+                welcome_message = (
+                    "Добро пожаловать в беседу "
+                    f"@id{member_id} ({users[0].first_name} {users[0].last_name})"
+                    "\n Посмотри закреп и чувствуй себя как дома^^"
+                )
+        except Exception:
+            pass
+
     await message.answer(
         message=welcome_message,
         keyboard=(
