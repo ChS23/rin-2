@@ -604,6 +604,16 @@ PROACTIVE_SHADOW = "rin:proactive:shadow"
 PROACTIVE_COOLDOWN_H = 3     # не чаще раза в N часов
 LULL_MIN = 90               # минут тишины, чтобы считать "чат заглох"
 LULL_MAX_H = 8              # дольше — уже не оживляем (не в пустоту)
+PROACTIVE_USAGE = "rin:proactive:usage"   # учёт токенов фичи по дням (hash: YYYY-MM-DD:in/out/calls)
+
+
+def _usage_of(result):
+    """Достать (input_tokens, output_tokens) из результата агента, безопасно."""
+    try:
+        u = result.context_wrapper.usage
+        return int(getattr(u, "input_tokens", 0) or 0), int(getattr(u, "output_tokens", 0) or 0)
+    except Exception:
+        return 0, 0
 
 
 @scheduler.scheduled_job(trigger="interval", minutes=12, max_instances=1, coalesce=True, misfire_grace_time=120)
@@ -658,6 +668,16 @@ async def rin_proactive_monitor():
     try:
         async with ai_lock:
             result = await run_agent_streamed(gate_agent, prompt)
+        # --- учёт токенов фичи (по дням) ---
+        tin, tout = _usage_of(result)
+        day = now.strftime("%Y-%m-%d")
+        try:
+            await rdb.hincrby(PROACTIVE_USAGE, f"{day}:in", tin)
+            await rdb.hincrby(PROACTIVE_USAGE, f"{day}:out", tout)
+            await rdb.hincrby(PROACTIVE_USAGE, f"{day}:calls", 1)
+        except Exception:
+            pass
+        await logger.ainfo("Proactive gate usage", tin=tin, tout=tout, signal=signal)
         raw = (result.final_output or "").strip()
         if raw.startswith("```"):
             raw = re.sub(r'^```(?:json)?\s*', '', raw)

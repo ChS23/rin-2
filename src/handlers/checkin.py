@@ -27,6 +27,11 @@ ai_model = OpenAIChatCompletionsModel(
     model=os.getenv("AI_MODEL", "gpt-4o"),
     openai_client=ai_client,
 )
+# Дешёвая модель для классификации/гейта (mimo-v2.5, не -pro) — тот же клиент, другое имя модели
+ai_model_light = OpenAIChatCompletionsModel(
+    model=os.getenv("AI_LIGHT_MODEL", os.getenv("AI_VISION_MODEL", "mimo-v2.5")),
+    openai_client=ai_client,
+)
 
 import agents
 agents.set_tracing_disabled(True)

@@ -1,6 +1,6 @@
 from agents import Agent, ModelSettings
 
-from src.handlers.checkin import ai_model, REACTIONS
+from src.handlers.checkin import ai_model, ai_model_light, REACTIONS
 from src.handlers.chat.tools import all_tools
 from src.handlers.creative.tools import analyze_image, find_files, grep_files, read_file, move_file
 from src.handlers.audio.agent import audio_tool
@@ -295,7 +295,7 @@ reflection_agent = Agent(
 )
 
 gate_agent = Agent(
-    model=ai_model,
+    model=ai_model_light,
     name="Рин (внутренняя мысль)",
     model_settings=_glm_extract,
     instructions=f"""
