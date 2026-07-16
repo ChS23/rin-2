@@ -18,7 +18,7 @@ from agents import RunHooks
 from src.bot import api, rdb
 from src.utils import run_agent_streamed
 from src.handlers.checkin import ai_lock, REACTIONS, scheduler, CHAT_PEER_ID
-from src.handlers.chat.agents import chat_agent, initiative_agent
+from src.handlers.chat.agents import chat_agent, initiative_agent, gate_agent
 from src.handlers.chat.tools import PENDING_FILE_KEY
 from src.handlers.chat.memory import (
     record_message, get_context,
@@ -29,7 +29,7 @@ from src.handlers.chat.memory import (
     add_episode, get_episodes, refresh_all_reflections,
 )
 from src.handlers.chat.utils import (
-    resolve_user_name, parse_response, get_community_context,
+    resolve_user_name, parse_response, get_community_context, _looks_like_refusal,
 )
 
 logger = structlog.get_logger("chat.handler")
@@ -592,3 +592,113 @@ async def rin_initiative():
         await logger.ainfo("Рин написала сама", text=text)
     except Exception as e:
         await logger.aerror("Ошибка инициативы Рин", error=str(e))
+
+
+# ═══════════════════════════════════════════════════════════
+#      ПРОАКТИВНОСТЬ — «внутренняя мысль» (shadow-first)
+# ═══════════════════════════════════════════════════════════
+# rin:proactive:enabled : отсутствует/0 = off | "shadow" = решает+логирует, НЕ постит | "live" = постит
+PROACTIVE_FLAG = "rin:proactive:enabled"
+PROACTIVE_LAST = "rin:proactive:last"
+PROACTIVE_SHADOW = "rin:proactive:shadow"
+PROACTIVE_COOLDOWN_H = 3     # не чаще раза в N часов
+LULL_MIN = 90               # минут тишины, чтобы считать "чат заглох"
+LULL_MAX_H = 8              # дольше — уже не оживляем (не в пустоту)
+
+
+@scheduler.scheduled_job(trigger="interval", minutes=12, max_instances=1, coalesce=True, misfire_grace_time=120)
+async def rin_proactive_monitor():
+    mode = await rdb.get(PROACTIVE_FLAG)
+    if mode not in ("shadow", "live"):
+        return
+
+    now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=3)))
+    if not (now.hour >= 9 or now.hour < 1):   # активные часы 9:00–01:00 МСК
+        return
+
+    raw_ts = await rdb.get(f"rin:chat:{CHAT_PEER_ID}:last_msg_ts")
+    recent = await rdb.lrange(f"rin:chat:{CHAT_PEER_ID}:history", -20, -1)
+    if not raw_ts or not recent:
+        return
+    try:
+        last_ts = datetime.datetime.fromisoformat(raw_ts)
+    except ValueError:
+        return
+    now_naive = datetime.datetime.now()
+    mins_silent = (now_naive - last_ts).total_seconds() / 60.0
+
+    # --- пре-гейт: не звать LLM без повода ---
+    if recent[-1].startswith("Рин:"):
+        return  # последнее слово её — не монолог
+    last_pro = await rdb.get(PROACTIVE_LAST)
+    if last_pro:
+        try:
+            if (now_naive - datetime.datetime.fromisoformat(last_pro)).total_seconds() < PROACTIVE_COOLDOWN_H * 3600:
+                return
+        except ValueError:
+            pass
+    human_recent = sum(1 for m in recent[-8:] if not m.startswith("Рин:"))
+    is_lull = LULL_MIN <= mins_silent <= LULL_MAX_H * 60
+    is_active = mins_silent <= 15 and human_recent >= 3
+    if not (is_lull or is_active):
+        return
+
+    signal = "чат заглох, пауза" if is_lull else "чат активен, тема катится"
+    self_state = [s for s in await get_rin_self_state() if not s.startswith("[creative]")]
+    chat_ids, chat_names = extract_participants_from_history(recent)
+    mem = get_memory_for_participants(chat_ids, chat_names)
+    prompt = (
+        f"Сейчас {now.strftime('%H:%M, %A')}. Сигнал: {signal}. "
+        f"Последнее сообщение человека — {int(mins_silent)} минут назад.\n\n"
+        + (("Твоё состояние (фон):\n" + "\n".join(f"- {s}" for s in self_state) + "\n\n") if self_state else "")
+        + (("Что ты помнишь об участниках:\n" + mem + "\n\n") if mem else "")
+        + "Последние сообщения чата:\n" + "\n".join(recent)
+    )
+
+    try:
+        async with ai_lock:
+            result = await run_agent_streamed(gate_agent, prompt)
+        raw = (result.final_output or "").strip()
+        if raw.startswith("```"):
+            raw = re.sub(r'^```(?:json)?\s*', '', raw)
+            raw = re.sub(r'```\s*$', '', raw).strip()
+        try:
+            d = orjson.loads(raw)
+        except orjson.JSONDecodeError:
+            m = re.search(r'\{.*\}', raw, re.DOTALL)
+            d = orjson.loads(m.group()) if m else {}
+    except Exception as e:
+        await logger.awarn("Proactive gate fail", error=str(e))
+        return
+
+    act = str(d.get("act", "silent")).lower()
+    text = (d.get("text") or "").strip()
+    why = str(d.get("why", ""))[:200]
+    gmode = d.get("mode")
+
+    # аудит-лог решения — всегда (и в shadow, и в live)
+    try:
+        entry = orjson.dumps({
+            "t": now.strftime("%d.%m %H:%M"), "signal": signal, "mins": int(mins_silent),
+            "act": act, "mode": gmode, "text": text, "why": why,
+        }).decode()
+        await rdb.rpush(PROACTIVE_SHADOW, entry)
+        await rdb.ltrim(PROACTIVE_SHADOW, -100, -1)
+    except Exception:
+        pass
+
+    if act != "speak" or not text or _looks_like_refusal(text):
+        return
+
+    if mode == "shadow":
+        await logger.ainfo("Proactive SHADOW (сказала бы)", text=text, why=why, signal=signal)
+        return
+
+    # LIVE
+    try:
+        await api.messages.send(peer_ids=[CHAT_PEER_ID], message=text, random_id=random.getrandbits(31))
+        await record_message(CHAT_PEER_ID, -GROUP_ID, text, resolve_user_name)
+        await rdb.set(PROACTIVE_LAST, now_naive.isoformat())
+        await logger.ainfo("Proactive LIVE (написала сама)", text=text, why=why, signal=signal)
+    except Exception as e:
+        await logger.aerror("Proactive send fail", error=str(e))
