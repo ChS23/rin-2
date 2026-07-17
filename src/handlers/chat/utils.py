@@ -81,6 +81,20 @@ def _looks_like_refusal(text: str) -> bool:
     return False
 
 
+def _sanitize_chat_text(text: str) -> str:
+    """Убрать то, что ВК рендерит уродливо или звучит по-ботовски: markdown **жирный**/__/бэктики/# заголовки и длинное тире."""
+    if not text:
+        return text
+    t = text
+    t = re.sub(r'\*\*(.+?)\*\*', r'\1', t, flags=re.DOTALL)      # **жирный**
+    t = re.sub(r'__(.+?)__', r'\1', t, flags=re.DOTALL)          # __жирный__
+    t = t.replace('**', '').replace('__', '')                    # висячие маркеры
+    t = t.replace('`', '')                                        # бэктики
+    t = re.sub(r'^\s{0,3}#{1,6}\s+', '', t, flags=re.MULTILINE)   # # заголовки
+    t = t.replace('—', '-').replace('–', '-')                    # длинное/среднее тире -> дефис
+    return t.strip()
+
+
 def parse_response(raw) -> RinResponse:
     if isinstance(raw, RinResponse):
         return raw

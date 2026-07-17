@@ -29,7 +29,7 @@ from src.handlers.chat.memory import (
     add_episode, get_episodes, refresh_all_reflections,
 )
 from src.handlers.chat.utils import (
-    resolve_user_name, parse_response, get_community_context, _looks_like_refusal,
+    resolve_user_name, parse_response, get_community_context, _looks_like_refusal, _sanitize_chat_text,
 )
 
 logger = structlog.get_logger("chat.handler")
@@ -459,6 +459,7 @@ async def chat_with_rin(message: Message, by_name: bool = False):
                 upload_failed = True
 
     r = parse_response(result.final_output)
+    r.text = _sanitize_chat_text(r.text)
     if fallback_link:
         r.text = (r.text or "") + f"\n\nвк файл не взял, держи ссылкой: {fallback_link}"
         await logger.ainfo("Upload fallback на файлохост", path=file_path, link=fallback_link)
@@ -581,7 +582,7 @@ async def rin_initiative():
         async with ai_lock:
             result = await run_agent_streamed(initiative_agent, prompt)
 
-        text = result.final_output.strip().strip('"')
+        text = _sanitize_chat_text(result.final_output.strip().strip('"'))
 
         await api.messages.send(
             peer_ids=[CHAT_PEER_ID],
@@ -692,7 +693,7 @@ async def rin_proactive_monitor():
         return
 
     act = str(d.get("act", "silent")).lower()
-    text = (d.get("text") or "").strip()
+    text = _sanitize_chat_text((d.get("text") or "").strip())
     why = str(d.get("why", ""))[:200]
     gmode = d.get("mode")
 
