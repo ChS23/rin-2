@@ -602,7 +602,7 @@ PROACTIVE_FLAG = "rin:proactive:enabled"
 PROACTIVE_LAST = "rin:proactive:last"
 PROACTIVE_SHADOW = "rin:proactive:shadow"
 PROACTIVE_COOLDOWN_H = 3     # не чаще раза в N часов
-LULL_MIN = 90               # минут тишины, чтобы считать "чат заглох"
+LULL_MIN = 60               # минут тишины, чтобы считать "чат заглох" (снижено с 90 — ловим revive-примеры в shadow)
 LULL_MAX_H = 8              # дольше — уже не оживляем (не в пустоту)
 PROACTIVE_USAGE = "rin:proactive:usage"   # учёт токенов фичи по дням (hash: YYYY-MM-DD:in/out/calls)
 
