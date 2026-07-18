@@ -606,6 +606,9 @@ PROACTIVE_COOLDOWN_H = 3     # не чаще раза в N часов
 LULL_MIN = 60               # минут тишины, чтобы считать "чат заглох" (снижено с 90 — ловим revive-примеры в shadow)
 LULL_MAX_H = 8              # дольше — уже не оживляем (не в пустоту)
 PROACTIVE_USAGE = "rin:proactive:usage"   # учёт токенов фичи по дням (hash: YYYY-MM-DD:in/out/calls)
+PROACTIVE_EVAL_TS = "rin:proactive:eval_ts"      # last_msg_ts, который gate уже оценивал (не жевать один лулл)
+PROACTIVE_GATE_LAST = "rin:proactive:gate_last"  # когда gate последний раз реально думал
+GATE_MIN_GAP_MIN = 15                            # не думать чаще раза в N минут
 
 
 def _usage_of(result):
@@ -654,6 +657,17 @@ async def rin_proactive_monitor():
     if not (is_lull or is_active):
         return
 
+    # не переоценивать одно и то же: тот же last_msg_ts (напр. долгий лулл) или думали <15 мин назад
+    if await rdb.get(PROACTIVE_EVAL_TS) == raw_ts:
+        return
+    gate_last = await rdb.get(PROACTIVE_GATE_LAST)
+    if gate_last:
+        try:
+            if (now_naive - datetime.datetime.fromisoformat(gate_last)).total_seconds() < GATE_MIN_GAP_MIN * 60:
+                return
+        except ValueError:
+            pass
+
     signal = "чат заглох, пауза" if is_lull else "чат активен, тема катится"
     self_state = [s for s in await get_rin_self_state() if not s.startswith("[creative]")]
     chat_ids, chat_names = extract_participants_from_history(recent)
@@ -679,6 +693,8 @@ async def rin_proactive_monitor():
         except Exception:
             pass
         await logger.ainfo("Proactive gate usage", tin=tin, tout=tout, signal=signal)
+        await rdb.set(PROACTIVE_EVAL_TS, raw_ts)
+        await rdb.set(PROACTIVE_GATE_LAST, now_naive.isoformat())
         raw = (result.final_output or "").strip()
         if raw.startswith("```"):
             raw = re.sub(r'^```(?:json)?\s*', '', raw)
