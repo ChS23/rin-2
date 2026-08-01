@@ -265,6 +265,13 @@ async def record_message(peer_id: int, from_id: int, text: str, resolve_name):
         name = await resolve_name(from_id)
         uid_prefix = f"@{from_id} "
 
+    # даталог: полная история чата (в Valkey окно всего HISTORY_SIZE, а тут — навсегда)
+    try:
+        from src.handlers.chat.datalog import log_message
+        log_message(peer_id, from_id, name, text, is_rin=(from_id == -GROUP_ID))
+    except Exception:
+        pass
+
     key = _history_key(peer_id)
     await rdb.rpush(key, f"{uid_prefix}{name}: {text}")
     await rdb.ltrim(key, -HISTORY_SIZE, -1)
