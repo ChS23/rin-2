@@ -31,6 +31,7 @@ from src.handlers.chat.memory import (
 from src.handlers.chat.utils import (
     resolve_user_name, parse_response, get_community_context, _looks_like_refusal, _sanitize_chat_text,
 )
+from src.handlers.chat.datalog import new_turn, log_turn
 
 logger = structlog.get_logger("chat.handler")
 labeler = BotLabeler()
@@ -172,7 +173,21 @@ class ChatHistoryMiddleware(BaseMiddleware[Message]):
             if att_desc:
                 text = (text + " " + " ".join(att_desc)).strip()
             if text:
-                await record_message(msg.peer_id, msg.from_id, text, resolve_user_name)
+                # сигнал вовлечённости: ответили ли Рин и через сколько
+                extra = {"cmid": cmid}
+                try:
+                    rm = msg.reply_message
+                    if rm and rm.from_id == -GROUP_ID:
+                        extra["reply_to_rin"] = True
+                        extra["reply_to_cmid"] = rm.conversation_message_id
+                        if rm.date:
+                            extra["reply_latency_s"] = int(
+                                datetime.datetime.now().timestamp() - rm.date)
+                    if msg.from_id != -GROUP_ID and _NAME_RE.search(text):
+                        extra["mentions_rin"] = True
+                except Exception:
+                    pass
+                await record_message(msg.peer_id, msg.from_id, text, resolve_user_name, extra=extra)
                 name = await resolve_user_name(msg.from_id) if msg.from_id > 0 else "бот"
                 await logger.adebug("Сообщение в чате", user=name, text=text[:80])
             # Timestamp для creative agent (проверка тишины)
@@ -362,6 +377,7 @@ async def chat_with_rin(message: Message, by_name: bool = False):
         text = "привет"
 
     user_name = await resolve_user_name(message.from_id)
+    new_turn("chat", message.peer_id, {"user_id": message.from_id, "user_name": user_name})
 
     now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=3)))  # МСК (UTC+3) явно, не наивное серверное время
     context = await get_context(message.peer_id)
@@ -434,9 +450,30 @@ async def chat_with_rin(message: Message, by_name: bool = False):
 
     prompt = "\n\n".join(prompt_parts)
 
+    # структурированный снимок впрыснутого контекста — материал для пертурбаций
+    _ctx = {
+        "user_id": message.from_id,
+        "user_name": user_name,
+        "input": text,
+        "attachments": attachments or None,
+        "mood": mood,
+        "hour": now.hour,
+        "weekday": now.strftime("%A"),
+        "gap_days": gap_days,
+        "days_since_user": days_since,
+        "self_state": self_state_personal,
+        "episodes": episodes,
+        "user_facts": user_facts,
+        "participants_memory": relevant_memory or None,
+        "community": community or None,
+        "chat_context_chars": len(context or ""),
+        "prompt_chars": None,   # заполним ниже
+    }
+
     try:
         async with ai_lock:
             await rdb.delete(PENDING_FILE_KEY)
+            _ctx["prompt_chars"] = len(prompt)
             result = await asyncio.wait_for(run_agent_streamed(chat_agent, prompt, hooks=_chat_hooks), timeout=600)
     except asyncio.TimeoutError:
         await logger.aerror("Таймаут AI в чате")
@@ -469,6 +506,7 @@ async def chat_with_rin(message: Message, by_name: bool = False):
 
     if not r.text:
         await update_last_seen(message.from_id)
+        log_turn("chat", _ctx, {"silent": True, "text": "", "reaction": r.reaction})
         await logger.ainfo("Рин промолчала", user_id=message.from_id, user_name=user_name, input=text)
         return
 
@@ -522,6 +560,17 @@ async def chat_with_rin(message: Message, by_name: bool = False):
     if r.episode:
         await add_episode(r.episode)
 
+    log_turn("chat", _ctx, {
+        "silent": False,
+        "text": r.text,
+        "reaction": r.reaction,
+        "remember": r.remember,
+        "forget": r.forget,
+        "self_update": r.self_update,
+        "episode": r.episode,
+        "attachment": attachment,
+    })
+
     await update_last_seen(message.from_id)
 
     await logger.ainfo("Рин ответила",
@@ -541,6 +590,7 @@ async def chat_with_rin(message: Message, by_name: bool = False):
 @scheduler.scheduled_job(trigger="cron", hour=3, minute=30)
 async def rin_reflect_job():
     """Пересобирает 'как Рин видит людей' (живая мысль) — ночью, до self_state"""
+    new_turn("cron:reflection", CHAT_PEER_ID)
     try:
         await refresh_all_reflections()
     except Exception as e:
@@ -550,6 +600,7 @@ async def rin_reflect_job():
 @scheduler.scheduled_job(trigger="cron", hour=4, minute=0)
 async def rin_self_state_update():
     """Обновляет собственное состояние Рин на основе истории чата за день"""
+    new_turn("cron:self_state", CHAT_PEER_ID)
     try:
         await refresh_rin_self_state(CHAT_PEER_ID)
     except Exception as e:
@@ -558,6 +609,7 @@ async def rin_self_state_update():
 
 @scheduler.scheduled_job(trigger="cron", hour=13, minute=30)
 async def rin_initiative():
+    new_turn("initiative", CHAT_PEER_ID)
     context = await get_context(CHAT_PEER_ID)
     self_state = await get_rin_self_state()
 
@@ -669,6 +721,7 @@ async def rin_proactive_monitor():
             pass
 
     signal = "чат заглох, пауза" if is_lull else "чат активен, тема катится"
+    new_turn("proactive", CHAT_PEER_ID, {"signal": signal, "mins_silent": int(mins_silent)})
     self_state = [s for s in await get_rin_self_state() if not s.startswith("[creative]")]
     chat_ids, chat_names = extract_participants_from_history(recent)
     mem = get_memory_for_participants(chat_ids, chat_names)
@@ -712,6 +765,12 @@ async def rin_proactive_monitor():
     text = _sanitize_chat_text((d.get("text") or "").strip())
     why = str(d.get("why", ""))[:200]
     gmode = d.get("mode")
+
+    log_turn("proactive", {
+        "signal": signal, "mins_silent": int(mins_silent), "mode": mode,
+        "self_state": self_state, "participants_memory": mem or None,
+        "recent_msgs": len(recent), "hour": now.hour,
+    }, {"act": act, "gate_mode": gmode, "text": text, "why": why})
 
     # аудит-лог решения — всегда (и в shadow, и в live)
     try:

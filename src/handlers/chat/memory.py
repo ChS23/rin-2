@@ -253,7 +253,7 @@ def _counter_key(peer_id: int) -> str:
 GROUP_ID = 204871130
 
 
-async def record_message(peer_id: int, from_id: int, text: str, resolve_name):
+async def record_message(peer_id: int, from_id: int, text: str, resolve_name, extra: dict | None = None):
     if not text:
         return
 
@@ -268,7 +268,7 @@ async def record_message(peer_id: int, from_id: int, text: str, resolve_name):
     # даталог: полная история чата (в Valkey окно всего HISTORY_SIZE, а тут — навсегда)
     try:
         from src.handlers.chat.datalog import log_message
-        log_message(peer_id, from_id, name, text, is_rin=(from_id == -GROUP_ID))
+        log_message(peer_id, from_id, name, text, is_rin=(from_id == -GROUP_ID), extra=extra)
     except Exception:
         pass
 

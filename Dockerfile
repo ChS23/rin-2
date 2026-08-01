@@ -33,4 +33,9 @@ RUN uv sync --no-dev --frozen --no-cache
 ENV PATH="/app/.venv/bin:/opt/renpy:$PATH"
 ENV SOUNDFONT="/usr/share/sounds/sf2/FluidR3_GM.sf2"
 
+# Версия кода для даталога (.git в образ не копируется — см. .dockerignore).
+# Ставится последним слоем, чтобы смена SHA не инвалидировала кеш сборки.
+ARG GIT_SHA=""
+ENV GIT_SHA=$GIT_SHA
+
 ENTRYPOINT [ "bash", "/app/src/scripts/entry" ]

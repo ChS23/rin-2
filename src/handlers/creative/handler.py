@@ -154,6 +154,8 @@ from src.handlers.creative.tools import PROJECT_DIR  # noqa: E402
 
 async def _run_and_save(prompt: str, label: str, post_result: bool = True):
     """Запустить creative agent и сохранить результат в self_state."""
+    from src.handlers.chat.datalog import new_turn
+    new_turn("creative", CHAT_PEER_ID, {"label": label})
     await logger.ainfo(f"Creative: {label}")
     try:
         async with ai_lock:

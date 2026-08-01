@@ -29,12 +29,14 @@ async def run_agent_streamed(agent, input, *, hooks=None, run_config=None, max_t
     started = time.monotonic()
     result = None
     err = None
+    ttft = None
     try:
         result = Runner.run_streamed(
             agent, input, hooks=hooks, run_config=run_config, max_turns=max_turns,
         )
         async for _event in result.stream_events():
-            pass  # consume stream, ждём завершения
+            if ttft is None:  # время до первого чанка — отдельно от полного времени
+                ttft = int((time.monotonic() - started) * 1000)
         return result
     except Exception as e:
         err = f"{type(e).__name__}: {e}"
@@ -42,6 +44,6 @@ async def run_agent_streamed(agent, input, *, hooks=None, run_config=None, max_t
     finally:
         try:  # даталог не должен ронять бота ни при каких условиях
             from src.handlers.chat.datalog import log_call
-            log_call(agent, input, result, int((time.monotonic() - started) * 1000), err)
+            log_call(agent, input, result, int((time.monotonic() - started) * 1000), err, ttft)
         except Exception:
             pass
