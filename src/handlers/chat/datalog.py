@@ -288,6 +288,13 @@ def log_call(agent, prompt, result, ms: int, error: str | None = None,
         pass
     if result is not None:
         rec.update(_response_meta(result))
+        # finish_reason SDK наружу не отдаёт — приближаем обрезку по лимиту токенов
+        try:
+            mt = (rec.get("settings") or {}).get("max_tokens")
+            if mt and rec.get("tokens_out") and rec["tokens_out"] >= mt * 0.98:
+                rec["truncated"] = True
+        except Exception:
+            pass
         tools = _tool_calls(result)
         if tools:
             rec["tools"] = tools

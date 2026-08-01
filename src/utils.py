@@ -35,8 +35,13 @@ async def run_agent_streamed(agent, input, *, hooks=None, run_config=None, max_t
             agent, input, hooks=hooks, run_config=run_config, max_turns=max_turns,
         )
         async for _event in result.stream_events():
-            if ttft is None:  # время до первого чанка — отдельно от полного времени
-                ttft = int((time.monotonic() - started) * 1000)
+            # TTFT: только по первому РЕАЛЬНОМУ чанку модели, а не по служебному
+            # событию SDK (иначе получается ttft≈1мс и метрика бессмысленна)
+            if ttft is None and getattr(_event, "type", "") == "raw_response_event":
+                d = getattr(_event, "data", None)
+                if d is not None and (getattr(d, "delta", None) is not None
+                                      or str(getattr(d, "type", "")).endswith("delta")):
+                    ttft = int((time.monotonic() - started) * 1000)
         return result
     except Exception as e:
         err = f"{type(e).__name__}: {e}"
