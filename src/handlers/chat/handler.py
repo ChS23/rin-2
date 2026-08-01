@@ -32,6 +32,7 @@ from src.handlers.chat.utils import (
     resolve_user_name, parse_response, get_community_context, _looks_like_refusal, _sanitize_chat_text,
 )
 from src.handlers.chat.datalog import new_turn, log_turn
+from src.handlers.chat.prompt import build_chat_prompt
 
 logger = structlog.get_logger("chat.handler")
 labeler = BotLabeler()
@@ -412,50 +413,18 @@ async def chat_with_rin(message: Message, by_name: bool = False):
     elif weekday >= 5:
         mood += ", выходные — расслабленная"
 
-    # Порядок: ситуация → self → чат → другие → community → user facts → сообщение
-    # (user facts и сообщение в конце — recency effect для трансформера)
-    prompt_parts = [f"Сейчас: {now.strftime('%d.%m.%Y %H:%M, %A')}. Ты сейчас {mood}."]
-    if gap_days is not None and gap_days >= 3:
-        prompt_parts.append(
-            f"Тебя не было в чате {gap_days} дней — просто выпала на время, так бывает. "
-            "История переписки и саммари, которые ты видишь, — это то, что было ДО твоего исчезновения, старые разговоры, а не свежие. "
-            "Вернись легко, как живой человек. НЕ придумывай причин, почему пропала (никаких сдохших ноутов, отключений света, разъездов, стажировок) и не оправдывайся — если не спросят, тему вообще не поднимай. Просто снова тут. Не делай вид, что разговор не прерывался."
-        )
     self_state_personal = [s for s in self_state if not s.startswith("[creative]")]
-    if self_state_personal:
-        prompt_parts.append("Твоё состояние и настроение (фон для тебя, НЕ зачитывай списком):\n" + "\n".join(f"- {s}" for s in self_state_personal))
-    if context:
-        prompt_parts.append(context)
-    if relevant_memory:
-        prompt_parts.append(f"Что ты помнишь об участниках разговора:\n{relevant_memory}")
-    if community:
-        prompt_parts.append(f"Инфо о сообществе:\n{community}")
-    if episodes:
-        prompt_parts.append("Ваши реальные внутряки (можешь ненавязчиво сослаться к месту; НЕ выдумывай новых):\n" + "\n".join(f"- {e}" for e in episodes))
-    # User facts ближе к сообщению — важнее всего для ответа
-    if user_facts:
-        user_ctx = f"Что ты помнишь о {user_name}:\n" + "\n".join(f"- {f}" for f in user_facts)
-        if days_since is not None and days_since >= 7:
-            user_ctx += f"\n(Последний раз общались {days_since} дней назад)"
-        prompt_parts.append(user_ctx)
-    elif days_since is None:
-        prompt_parts.append(f"({user_name} впервые пишет тебе)")
-    elif days_since >= 7:
-        prompt_parts.append(f"({user_name} не заходил {days_since} дней)")
     attachments = await _extract_attachments(message)
-    msg = f"{user_name} обращается к тебе: {text}"
-    if attachments:
-        msg += "\nПрикреплено: " + ", ".join(attachments)
-    prompt_parts.append(msg)
 
-    prompt = "\n\n".join(prompt_parts)
-
-    # структурированный снимок впрыснутого контекста — материал для пертурбаций
+    # Структурированный контекст — единственный источник правды для промпта.
+    # Он же пишется в turns-*.jsonl, поэтому харнесс реплеев собирает промпт из
+    # тех же данных той же функцией (см. src/handlers/chat/prompt.py).
     _ctx = {
         "user_id": message.from_id,
         "user_name": user_name,
         "input": text,
         "attachments": attachments or None,
+        "now_str": now.strftime('%d.%m.%Y %H:%M, %A'),
         "mood": mood,
         "hour": now.hour,
         "weekday": now.strftime("%A"),
@@ -466,9 +435,11 @@ async def chat_with_rin(message: Message, by_name: bool = False):
         "user_facts": user_facts,
         "participants_memory": relevant_memory or None,
         "community": community or None,
-        "chat_context_chars": len(context or ""),
-        "prompt_chars": None,   # заполним ниже
+        "chat_context": context or None,   # полный текст: саммари + окно истории
+        "prompt_chars": None,              # заполним ниже
     }
+
+    prompt = build_chat_prompt(_ctx)
 
     try:
         async with ai_lock:
