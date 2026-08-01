@@ -680,6 +680,28 @@ PROACTIVE_EVAL_TS = "rin:proactive:eval_ts"      # last_msg_ts, который g
 PROACTIVE_GATE_LAST = "rin:proactive:gate_last"  # когда gate последний раз реально думал
 GATE_MIN_GAP_MIN = 15                            # не думать чаще раза в N минут
 
+# ── Полевой эксперимент: уровень проактивности назначается СЛУЧАЙНО на день ──
+# Системные инструкции гейта при этом НЕ меняются (instructions_hash стабилен) —
+# манипуляция уходит в рантайм-промпт, поэтому она видна прямо в логе вызова.
+PROACTIVE_LEVEL = "rin:proactive:level"
+PROACTIVE_POSTS = "rin:proactive:posts:{date}"
+MAX_POSTS_PER_DAY = 3
+
+LEVELS = {
+    # уровень:      (кулдаун постинга, ч; переоценка лулла, мин; директива в промпт)
+    "conservative": (3, None, "Режим: сдержанный. По умолчанию молчи — говори только если повод очевиден."),
+    "moderate":     (2, 90, "Режим: обычный. Скажи, если тебе правда есть что добавить или чат заглох. Активный диалог двоих не перебивай."),
+    "open":         (1, 60, "Режим: живой. Если повод уместный — лучше сказать, чем промолчать. Жёсткие запреты (личное, торг, конфликт, твоё же последнее слово) остаются в силе."),
+}
+
+
+@scheduler.scheduled_job(trigger="cron", hour=9, minute=0)
+async def rin_proactive_assign_level():
+    """Случайно назначить уровень проактивности на день (рандомизация условия)."""
+    level = random.choice(list(LEVELS))
+    await rdb.set(PROACTIVE_LEVEL, level)
+    await logger.ainfo("Proactive: уровень на сегодня", level=level)
+
 
 def _usage_of(result):
     """Достать (input_tokens, output_tokens) из результата агента, безопасно."""
@@ -714,10 +736,15 @@ async def rin_proactive_monitor():
     # --- пре-гейт: не звать LLM без повода ---
     if recent[-1].startswith("Рин:"):
         return  # последнее слово её — не монолог
+    level = await rdb.get(PROACTIVE_LEVEL) or "conservative"
+    if level not in LEVELS:
+        level = "conservative"
+    cooldown_h, reeval_min, directive = LEVELS[level]
+
     last_pro = await rdb.get(PROACTIVE_LAST)
     if last_pro:
         try:
-            if (now_naive - datetime.datetime.fromisoformat(last_pro)).total_seconds() < PROACTIVE_COOLDOWN_H * 3600:
+            if (now_naive - datetime.datetime.fromisoformat(last_pro)).total_seconds() < cooldown_h * 3600:
                 return
         except ValueError:
             pass
@@ -727,16 +754,21 @@ async def rin_proactive_monitor():
     if not (is_lull or is_active):
         return
 
-    # не переоценивать одно и то же: тот же last_msg_ts (напр. долгий лулл) или думали <15 мин назад
-    if await rdb.get(PROACTIVE_EVAL_TS) == raw_ts:
-        return
     gate_last = await rdb.get(PROACTIVE_GATE_LAST)
+    secs_since_think = None
     if gate_last:
         try:
-            if (now_naive - datetime.datetime.fromisoformat(gate_last)).total_seconds() < GATE_MIN_GAP_MIN * 60:
-                return
+            secs_since_think = (now_naive - datetime.datetime.fromisoformat(gate_last)).total_seconds()
         except ValueError:
             pass
+
+    # Один и тот же лулл не жуём каждые 12 минут (это был токен-взрыв). На сдержанном
+    # уровне — ровно один взгляд; на остальных разрешаем вернуться через reeval_min.
+    if await rdb.get(PROACTIVE_EVAL_TS) == raw_ts:
+        if reeval_min is None or secs_since_think is None or secs_since_think < reeval_min * 60:
+            return
+    if secs_since_think is not None and secs_since_think < GATE_MIN_GAP_MIN * 60:
+        return
 
     signal = "чат заглох, пауза" if is_lull else "чат активен, тема катится"
     new_turn("proactive", CHAT_PEER_ID, {"signal": signal, "mins_silent": int(mins_silent)})
@@ -745,7 +777,8 @@ async def rin_proactive_monitor():
     mem = get_memory_for_participants(chat_ids, chat_names)
     prompt = (
         f"Сейчас {now.strftime('%H:%M, %A')}. Сигнал: {signal}. "
-        f"Последнее сообщение человека — {int(mins_silent)} минут назад.\n\n"
+        f"Последнее сообщение человека — {int(mins_silent)} минут назад.\n"
+        f"{directive}\n\n"
         + (("Твоё состояние (фон):\n" + "\n".join(f"- {s}" for s in self_state) + "\n\n") if self_state else "")
         + (("Что ты помнишь об участниках:\n" + mem + "\n\n") if mem else "")
         + "Последние сообщения чата:\n" + "\n".join(recent)
@@ -786,6 +819,7 @@ async def rin_proactive_monitor():
 
     log_turn("proactive", {
         "signal": signal, "mins_silent": int(mins_silent), "mode": mode,
+        "level": level, "cooldown_h": cooldown_h, "reeval_min": reeval_min,
         "self_state": self_state, "participants_memory": mem or None,
         "recent_msgs": len(recent), "hour": now.hour,
     }, {"act": act, "gate_mode": gmode, "text": text, "why": why})
@@ -794,7 +828,7 @@ async def rin_proactive_monitor():
     try:
         entry = orjson.dumps({
             "t": now.strftime("%d.%m %H:%M"), "signal": signal, "mins": int(mins_silent),
-            "act": act, "mode": gmode, "text": text, "why": why,
+            "act": act, "mode": gmode, "level": level, "text": text, "why": why,
         }).decode()
         await rdb.rpush(PROACTIVE_SHADOW, entry)
         await rdb.ltrim(PROACTIVE_SHADOW, -100, -1)
@@ -808,11 +842,19 @@ async def rin_proactive_monitor():
         await logger.ainfo("Proactive SHADOW (сказала бы)", text=text, why=why, signal=signal)
         return
 
-    # LIVE
+    # LIVE — жёсткий потолок постов в сутки, независимо от уровня
+    posts_key = PROACTIVE_POSTS.format(date=now.strftime("%Y-%m-%d"))
+    posted_today = int(await rdb.get(posts_key) or 0)
+    if posted_today >= MAX_POSTS_PER_DAY:
+        await logger.ainfo("Proactive: дневной лимит постов исчерпан", level=level, posted=posted_today)
+        return
     try:
         await api.messages.send(peer_ids=[CHAT_PEER_ID], message=text, random_id=random.getrandbits(31))
         await record_message(CHAT_PEER_ID, -GROUP_ID, text, resolve_user_name)
         await rdb.set(PROACTIVE_LAST, now_naive.isoformat())
-        await logger.ainfo("Proactive LIVE (написала сама)", text=text, why=why, signal=signal)
+        await rdb.incr(posts_key)
+        await rdb.expire(posts_key, 172800)
+        await logger.ainfo("Proactive LIVE (написала сама)", text=text, why=why,
+                           signal=signal, level=level)
     except Exception as e:
         await logger.aerror("Proactive send fail", error=str(e))
