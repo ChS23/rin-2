@@ -154,6 +154,48 @@ def get_memory_for_participants(user_ids: set[str], names: set[str], exclude_uid
 # ═══════════════════════════════════════════════════════════
 #             РЕФЛЕКСИЯ — КАК РИН ВИДИТ ЧЕЛОВЕКА
 # ═══════════════════════════════════════════════════════════
+async def dump_state_snapshot(tag: str = "manual") -> int:
+    """Слепок живого состояния из Valkey + файла памяти в /app/data/logs.
+
+    Valkey-том в restic-бэкап НЕ входит, а bot_data входит — поэтому дамп кладём
+    в файлы. Снимается дважды за ночь (до и после ночных джобов), чтобы было видно,
+    что именно поменяли self_state-агент и рефлексии, а что — разговоры за день.
+    """
+    from src.handlers.chat.datalog import _append, code_version
+    from src.handlers.checkin import CHAT_PEER_ID
+
+    snap: dict = {"tag": tag, "code_version": code_version()}
+    try:
+        snap["self_state"] = await get_rin_self_state()
+        snap["self_archive"] = await get_rin_self_archive()
+        snap["episodes"] = await rdb.lrange(EPISODES_KEY, 0, -1)
+        snap["chat_summary"] = await rdb.get(_summary_key(CHAT_PEER_ID))
+        snap["chat_history"] = await rdb.lrange(_history_key(CHAT_PEER_ID), 0, -1)
+        snap["proactive"] = {
+            "enabled": await rdb.get("rin:proactive:enabled"),
+            "decisions": await rdb.lrange("rin:proactive:shadow", 0, -1),
+            "usage": await rdb.hgetall("rin:proactive:usage"),
+        }
+        snap["creative"] = {
+            "paused": await rdb.get("rin:creative:paused"),
+            "last_run": await rdb.get("rin:creative:last_run"),
+        }
+        snap["last_active"] = await rdb.get("rin:last_active")
+        seen = {}
+        async for k in rdb.scan_iter(match="rin:user:*:last_seen", count=200):
+            seen[k.split(":")[2]] = await rdb.get(k)
+        snap["last_seen"] = seen
+        snap["people"] = load_memory()      # факты + рефлексии (история дрейфа по дням)
+    except Exception as e:
+        snap["error"] = f"{type(e).__name__}: {e}"
+
+    _append("state", snap)
+    await logger.ainfo("Слепок состояния сохранён", tag=tag,
+                       self_state=len(snap.get("self_state") or []),
+                       episodes=len(snap.get("episodes") or []))
+    return len(snap.get("self_state") or [])
+
+
 async def refresh_all_reflections():
     """Пересобрать 'как Рин видит человека' (одна живая мысль) для всех, у кого ≥3 фактов."""
     from src.handlers.chat.agents import reflection_agent

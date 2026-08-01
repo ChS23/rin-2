@@ -26,7 +26,7 @@ from src.handlers.chat.memory import (
     get_user_memory, get_memory_for_participants, extract_participants_from_history,
     get_rin_self_state, refresh_rin_self_state, update_rin_self_state,
     update_last_seen, get_days_since, get_rin_gap_days,
-    add_episode, get_episodes, refresh_all_reflections,
+    add_episode, get_episodes, refresh_all_reflections, dump_state_snapshot,
 )
 from src.handlers.chat.utils import (
     resolve_user_name, parse_response, get_community_context, _looks_like_refusal, _sanitize_chat_text,
@@ -586,6 +586,24 @@ async def chat_with_rin(message: Message, by_name: bool = False):
 # ═══════════════════════════════════════════════════════════
 #                    РИН ИНИЦИИРУЕТ
 # ═══════════════════════════════════════════════════════════
+
+@scheduler.scheduled_job(trigger="cron", hour=3, minute=0)
+async def rin_state_dump_pre():
+    """Слепок состояния ДО ночных джобов (рефлексии 03:30, self_state 04:00)"""
+    try:
+        await dump_state_snapshot("pre-nightly")
+    except Exception as e:
+        await logger.awarn("Не удалось снять слепок состояния", error=str(e))
+
+
+@scheduler.scheduled_job(trigger="cron", hour=4, minute=30)
+async def rin_state_dump_post():
+    """Слепок ПОСЛЕ ночных джобов — разница показывает, что изменили они"""
+    try:
+        await dump_state_snapshot("post-nightly")
+    except Exception as e:
+        await logger.awarn("Не удалось снять слепок состояния", error=str(e))
+
 
 @scheduler.scheduled_job(trigger="cron", hour=3, minute=30)
 async def rin_reflect_job():
