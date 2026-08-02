@@ -196,11 +196,39 @@ async def dump_state_snapshot(tag: str = "manual") -> int:
     return len(snap.get("self_state") or [])
 
 
+_NUMERAL_WORDS = (
+    "тысяч", "сотн", "полторы", "полтора", "десятк", "сорок", "пятьдесят",
+    "шестьдесят", "семьдесят", "восемьдесят", "девяносто", "двадцать", "тридцать",
+    "сто ", "двести", "триста", "четыреста", "пятьсот", "миллион",
+)
+
+
+def _reflection_numbers_ok(text: str, facts: list[str]) -> str | None:
+    """Проверить, что числа в рефлексии не выдуманы.
+
+    Наблюдалось (02.08.2026): факт «1200+ спрайтов» превращался в рефлексии в
+    «полторы тысячи», потом в «сто двадцать». Источник при этом оставался верным,
+    так что расхождение незаметно — ловим его здесь.
+    Возвращает причину отбраковки или None, если всё чисто.
+    """
+    import re
+    joined = " ".join(facts)
+    for num in re.findall(r"\d+", text or ""):
+        if num not in joined:
+            return f"число {num} отсутствует в фактах"
+    low = (text or "").lower()
+    for w in _NUMERAL_WORDS:
+        if w in low:
+            return f"число прописью ('{w.strip()}') — требуется цифрами и точно из фактов"
+    return None
+
+
 async def refresh_all_reflections():
     """Пересобрать 'как Рин видит человека' (одна живая мысль) для всех, у кого ≥3 фактов."""
     from src.handlers.chat.agents import reflection_agent
     memory = load_memory()
     updated = 0
+    rejected = 0
     for uid, entry in list(memory.items()):
         facts = entry.get("facts") or []
         if len(facts) < 3:
@@ -211,6 +239,13 @@ async def refresh_all_reflections():
                 result = await run_agent_streamed(reflection_agent, prompt)
             text = (result.final_output or "").strip().strip('"').strip()
             if text:
+                bad = _reflection_numbers_ok(text, facts)
+                if bad:
+                    # искажённая цифра ушла бы в промпт как её собственная память
+                    rejected += 1
+                    await logger.awarn("Рефлексия отбракована", name=entry.get("name"),
+                                       reason=bad, text=text[:120])
+                    continue
                 async with _memory_lock:
                     m = load_memory()
                     if uid in m:
@@ -219,7 +254,7 @@ async def refresh_all_reflections():
                 updated += 1
         except Exception as e:
             await logger.awarn("Не удалось сделать рефлексию", uid=uid, error=str(e))
-    await logger.ainfo("Рефлексии обновлены", count=updated)
+    await logger.ainfo("Рефлексии обновлены", count=updated, rejected=rejected)
 
 
 # ═══════════════════════════════════════════════════════════
