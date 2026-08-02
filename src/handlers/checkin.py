@@ -205,6 +205,22 @@ async def reply_to_daily_message(message: Message):
     await logger.ainfo("Ответ на чекин", user_id=message.from_id, text=message.text)
 
 
+async def _record_own_message(text: str, tag: str):
+    """Чек-ины отправляются мимо chat-хендлера, поэтому в историю и даталог их
+    надо класть вручную — иначе исходящие сообщения Рин выпадают из датасета,
+    а реплаи на них ссылаются на несуществующую запись."""
+    if not text:
+        return
+    try:
+        from src.handlers.chat.memory import record_message, GROUP_ID
+        from src.handlers.chat.utils import resolve_user_name
+        from src.handlers.chat.datalog import new_turn
+        new_turn(tag, CHAT_PEER_ID)
+        await record_message(CHAT_PEER_ID, -GROUP_ID, text, resolve_user_name)
+    except Exception as e:
+        await logger.awarn("Не удалось записать чек-ин в даталог", error=str(e))
+
+
 @scheduler.scheduled_job(trigger=CronTrigger(hour=16, minute=10))
 async def end_of_day_checkin():
     # Атомарно забираем ответы из Valkey
@@ -241,6 +257,7 @@ async def end_of_day_checkin():
             message=result.final_output,
             random_id=random.getrandbits(31),
         )
+        await _record_own_message(result.final_output, "checkin:evening")
     except Exception as e:
         await logger.aerror("Ошибка вечернего чекина", error=str(e))
 
@@ -258,6 +275,7 @@ async def midday_checkin():
         )
         msg_id = response[0].conversation_message_id
         await set_daily_message_id(msg_id)
+        await _record_own_message(result.final_output, "checkin:midday")
         await logger.ainfo("Утренний чекин отправлен", message_id=msg_id)
     except Exception as e:
         await logger.aerror("Ошибка утреннего чекина", error=str(e))
