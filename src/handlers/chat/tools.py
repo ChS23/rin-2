@@ -153,6 +153,7 @@ ALLOWED_EXTS = {
     ".ogg", ".mp3", ".wav", ".flac",           # аудио
     ".png", ".jpg", ".jpeg", ".gif", ".webp",  # картинки
     ".pdf", ".txt", ".md", ".csv",             # документы
+    ".rpy", ".rpym", ".py", ".json",           # исходники: чат ренпайщиков, их шлют постоянно
     ".zip",                                     # архивы
 }
 MAX_DOWNLOAD_BYTES = 30 * 1024 * 1024  # 30 MB

@@ -111,14 +111,18 @@ async def edit_file(filename: str, old_string: str, new_string: str) -> str:
 
 
 @function_tool
-def find_files(pattern: str = "*.rpy", path: str = "chastota") -> str:
+def find_files(pattern: str = "*", path: str = "") -> str:
     """Найти файлы по glob-паттерну.
-    pattern — паттерн (*.rpy, **/*.png, *.ogg). По умолчанию *.rpy.
-    path — директория для поиска относительно скриптов. По умолчанию 'chastota'."""
-    try:
-        search_dir = _safe_path(path) if path else SCRIPTS_DIR
-    except ValueError:
-        return "Недопустимый путь"
+    pattern — паттерн (*.rpy, **/*.png, *.ogg). По умолчанию все файлы.
+    path — директория относительно папки скриптов. ПУСТО или '.' = корень, где
+    лежат файлы, присланные людьми в чат. Для игры укажи 'chastota'."""
+    if path in ("", ".", "/", "./"):
+        search_dir = SCRIPTS_DIR
+    else:
+        try:
+            search_dir = _safe_path(path)
+        except ValueError:
+            return "Недопустимый путь"
     if not search_dir.exists():
         return f"Директория {path} не найдена"
     files = sorted(search_dir.rglob(pattern))
