@@ -164,7 +164,8 @@ async def dump_state_snapshot(tag: str = "manual") -> int:
     from src.handlers.chat.datalog import _append, code_version
     from src.handlers.checkin import CHAT_PEER_ID
 
-    snap: dict = {"tag": tag, "code_version": code_version()}
+    snap: dict = {"ts": datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=3))).isoformat(),
+                   "tag": tag, "code_version": code_version()}
     try:
         snap["self_state"] = await get_rin_self_state()
         snap["self_archive"] = await get_rin_self_archive()

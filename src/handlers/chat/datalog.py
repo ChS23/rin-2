@@ -209,8 +209,25 @@ def _tool_calls(result) -> list:
     return tools
 
 
+def _load_known_prompt_hashes():
+    """Подтянуть уже выгруженные хеши, чтобы рестарт не плодил дубли в prompts.jsonl."""
+    global _seen_prompt_hashes
+    try:
+        with open(LOGS_DIR / "prompts.jsonl", "rb") as f:
+            for line in f:
+                try:
+                    _seen_prompt_hashes.add(orjson.loads(line)["instructions_hash"])
+                except Exception:
+                    pass
+    except FileNotFoundError:
+        pass
+    _seen_prompt_hashes.add("__loaded__")
+
+
 def _prompt_hash(agent) -> str | None:
     """Хеш системных инструкций + разовый дамп полного текста при новой версии."""
+    if "__loaded__" not in _seen_prompt_hashes:
+        _load_known_prompt_hashes()
     try:
         instr = getattr(agent, "instructions", None)
         if not isinstance(instr, str) or not instr:
