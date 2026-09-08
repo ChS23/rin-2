@@ -1,11 +1,8 @@
-FROM python:3.12-slim-bullseye
+FROM python:3.12-slim-bookworm
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
-# bullseye ушёл в LTS, метаданные security-репо периодически протухают —
-# без этого флага apt-get update падает с exit 100 и ломает сборку.
-RUN apt-get -o Acquire::Check-Valid-Until=false update \
-    && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     fluidsynth \
     fluid-soundfont-gm \
     opus-tools \
