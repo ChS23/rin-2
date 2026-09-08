@@ -14,6 +14,7 @@ from vkbottle.dispatch.rules import ABCRule
 from vkbottle.bot import Message, BotLabeler
 
 from src.bot import api, rdb
+from src.handlers.chat.utils import _sanitize_chat_text
 from src.utils import run_agent_streamed
 
 ai_client = AsyncOpenAI(
@@ -252,12 +253,13 @@ async def end_of_day_checkin():
     try:
         async with ai_lock:
             result = await run_agent_streamed(end_of_day_agent, prompt)
+        text = _sanitize_chat_text(result.final_output)
         await api.messages.send(
             peer_ids=[CHAT_PEER_ID],
-            message=result.final_output,
+            message=text,
             random_id=random.getrandbits(31),
         )
-        await _record_own_message(result.final_output, "checkin:evening")
+        await _record_own_message(text, "checkin:evening")
     except Exception as e:
         await logger.aerror("Ошибка вечернего чекина", error=str(e))
 
@@ -268,14 +270,15 @@ async def midday_checkin():
         async with ai_lock:
             result = await run_agent_streamed(midday_agent, f"Текущий день: {datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=3))).strftime('%d.%m.%Y %A %B')}")
 
+        text = _sanitize_chat_text(result.final_output)
         response = await api.messages.send(
             peer_ids=[CHAT_PEER_ID],
-            message=result.final_output,
+            message=text,
             random_id=random.getrandbits(31),
         )
         msg_id = response[0].conversation_message_id
         await set_daily_message_id(msg_id)
-        await _record_own_message(result.final_output, "checkin:midday")
+        await _record_own_message(text, "checkin:midday")
         await logger.ainfo("Утренний чекин отправлен", message_id=msg_id)
     except Exception as e:
         await logger.aerror("Ошибка утреннего чекина", error=str(e))
