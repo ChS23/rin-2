@@ -14,7 +14,6 @@ from vkbottle.dispatch.rules import ABCRule
 from vkbottle.bot import Message, BotLabeler
 
 from src.bot import api, rdb
-from src.handlers.chat.utils import _sanitize_chat_text
 from src.utils import run_agent_streamed
 
 ai_client = AsyncOpenAI(
@@ -253,6 +252,7 @@ async def end_of_day_checkin():
     try:
         async with ai_lock:
             result = await run_agent_streamed(end_of_day_agent, prompt)
+        from src.handlers.chat.utils import _sanitize_chat_text
         text = _sanitize_chat_text(result.final_output)
         await api.messages.send(
             peer_ids=[CHAT_PEER_ID],
@@ -270,6 +270,7 @@ async def midday_checkin():
         async with ai_lock:
             result = await run_agent_streamed(midday_agent, f"Текущий день: {datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=3))).strftime('%d.%m.%Y %A %B')}")
 
+        from src.handlers.chat.utils import _sanitize_chat_text
         text = _sanitize_chat_text(result.final_output)
         response = await api.messages.send(
             peer_ids=[CHAT_PEER_ID],
