@@ -119,6 +119,7 @@ async def run_one(turn: dict, cond_name: str, sample: int, run_id: str, sem: asy
     rec = {
         "run_id": run_id,
         "model": getattr(replay_agent.model, "model", str(replay_agent.model)),
+        "thinking": (replay_agent.model_settings.extra_body or {}).get("thinking", {}).get("type"),
         "turn_id": turn_id,
         "condition": cond_name,
         "sample": sample,
@@ -170,7 +171,19 @@ async def main():
     ap.add_argument("--run-id", default=None)
     ap.add_argument("--model", default=None,
                     help="другая модель вместо чат-агентовской (тот же клиент, промпт и настройки)")
+    ap.add_argument("--thinking", choices=["on", "off"], default=None,
+                    help="включить/выключить режим размышлений (по умолчанию — как у чат-агента)")
+    ap.add_argument("--turns", default=None,
+                    help="файл со списком turn_id (по одному в строке, # — комментарий): эталонный набор")
     args = ap.parse_args()
+
+    if args.thinking:
+        import dataclasses
+        from src.handlers.checkin import NO_THINKING
+        body = NO_THINKING if args.thinking == "off" else {
+            "thinking": {"type": "enabled"}, "chat_template_kwargs": {"enable_thinking": True}}
+        replay_agent = replay_agent.clone(
+            model_settings=dataclasses.replace(replay_agent.model_settings, extra_body=body))
 
     if args.model:
         from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
@@ -184,6 +197,14 @@ async def main():
         raise SystemExit(f"неизвестные условия: {bad}\nдоступны: {list(CONDITIONS)}")
 
     turns = load_turns(args.date, args.limit)
+    if args.turns:
+        wanted = [ln.split("#", 1)[0].strip() for ln in open(args.turns, encoding="utf-8")]
+        wanted = [w for w in wanted if w]
+        by_id = {t.get("turn_id"): t for t in load_turns(None, None)}
+        missing = [w for w in wanted if w not in by_id]
+        if missing:
+            print(f"нет в логах: {missing}")
+        turns = [by_id[w] for w in wanted if w in by_id]
     if not turns:
         raise SystemExit("ходов не найдено — логи ещё не накопились?")
 
@@ -191,7 +212,8 @@ async def main():
     total = len(turns) * len(conds) * args.k
     print(f"ходов: {len(turns)} × условий: {len(conds)} × сэмплов: {args.k} = {total} прогонов")
     print(f"run_id: {run_id} → {LOGS_DIR}/replay-{run_id}.jsonl")
-    print(f"модель: {getattr(replay_agent.model, 'model', replay_agent.model)}")
+    print(f"модель: {getattr(replay_agent.model, 'model', replay_agent.model)}, "
+          f"thinking: {args.thinking or 'как у чат-агента'}")
 
     new_turn(f"replay:{run_id}")   # чтобы вызовы в calls-*.jsonl были помечены
     sem = asyncio.Semaphore(args.concurrency)
