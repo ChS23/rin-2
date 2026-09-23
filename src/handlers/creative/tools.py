@@ -6,6 +6,7 @@ import aiohttp
 import structlog
 from agents import function_tool
 
+from src.net_guard import BlockedURL, safe_get, safe_session
 from src.handlers.chat.tools import (
     SCRIPTS_DIR, _safe_path,
     _generate_image_cascade,
@@ -311,8 +312,8 @@ async def analyze_image(image_url: str, question: str = "Опиши что на 
     else:
         # Скачиваем картинку и передаём как base64 (VK CDN и другие закрытые URL не доступны для API)
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(image_url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            async with safe_session() as session:
+                async with await safe_get(session, image_url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
                     if resp.status != 200:
                         return f"Не удалось скачать картинку: HTTP {resp.status}"
                     data = await resp.read()
@@ -322,6 +323,9 @@ async def analyze_image(image_url: str, question: str = "Опиши что на 
             ct = resp.content_type or "image/jpeg"
             data_url = f"data:{ct};base64,{b64}"
             content.append({"type": "image_url", "image_url": {"url": data_url}})
+        except BlockedURL as e:
+            await logger.awarn("analyze_image: заблокирован внутренний адрес", url=image_url[:200], reason=str(e))
+            return "эта ссылка ведёт во внутреннюю сеть, не открываю"
         except Exception as e:
             await logger.awarn("Image download error", error=str(e), url=image_url[:100])
             return "не могу скачать картинку, ссылка не грузится"
