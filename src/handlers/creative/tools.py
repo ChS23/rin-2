@@ -276,7 +276,7 @@ _vision_client = AsyncOpenAI(
     timeout=120.0,
     max_retries=2,
 )
-VISION_MODEL = os.getenv("AI_VISION_MODEL", "mimo-v2.5")
+VISION_MODEL = os.getenv("AI_VISION_MODEL", "mimo-v2.6-flash")
 
 
 @function_tool

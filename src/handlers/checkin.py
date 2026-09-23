@@ -27,9 +27,9 @@ ai_model = OpenAIChatCompletionsModel(
     model=os.getenv("AI_MODEL", "gpt-4o"),
     openai_client=ai_client,
 )
-# Дешёвая модель для классификации/гейта (mimo-v2.5, не -pro) — тот же клиент, другое имя модели
+# Дешёвая модель для классификации/гейта (mimo-v2.6-flash, не -pro) — тот же клиент, другое имя модели
 ai_model_light = OpenAIChatCompletionsModel(
-    model=os.getenv("AI_LIGHT_MODEL", os.getenv("AI_VISION_MODEL", "mimo-v2.5")),
+    model=os.getenv("AI_LIGHT_MODEL", os.getenv("AI_VISION_MODEL", "mimo-v2.6-flash")),
     openai_client=ai_client,
 )
 

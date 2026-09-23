@@ -95,9 +95,12 @@ RIN_LORE = """
     - Внутренние шутки: если помнишь смешной момент из чата — можешь отослать. Не выдумывай.
 """
 
-# MiMo v2.5-pro: официально рекомендованы temperature=1.0 + top_p=0.95 (mimo.mi.com/docs).
+# MiMo v2.6: официально рекомендованы temperature=1.0 + top_p=0.95 (mimo.mi.com/docs).
 # top_p подрезает хвост маловероятных токенов — меньше рандомной конфабуляции и англ. слов-паразитов.
-_glm_heavy = ModelSettings(temperature=1.0, top_p=0.95, max_tokens=128_000)  # чат + тулы; reasoning по умолчанию (модель решает)
+# У v2.6 reasoning ВКЛЮЧЁН по умолчанию (у v2.5-pro по факту не срабатывал: 0 в 906/910 вызовах),
+# и в режиме reasoning temperature/top_p провайдер форсит сам. Выключаем явно — чтобы переезд
+# v2.5→v2.6 менял только модель, а не модель + режим размышлений.
+_glm_heavy = ModelSettings(temperature=1.0, top_p=0.95, max_tokens=128_000, extra_body={"chat_template_kwargs": {"enable_thinking": False}})  # чат + тулы
 # Лёгкие агенты — reasoning ВЫКЛ через MiMo-параметр chat_template_kwargs.enable_thinking=false.
 # (Старый GLM-евский extra_body={"thinking":{"type":"disabled"}} MiMo молча игнорил — reasoning не выключался.)
 _glm_light = ModelSettings(temperature=1.0, top_p=0.95, max_tokens=32_000, extra_body={"chat_template_kwargs": {"enable_thinking": False}})

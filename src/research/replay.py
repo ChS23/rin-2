@@ -118,6 +118,7 @@ async def run_one(turn: dict, cond_name: str, sample: int, run_id: str, sem: asy
 
     rec = {
         "run_id": run_id,
+        "model": getattr(replay_agent.model, "model", str(replay_agent.model)),
         "turn_id": turn_id,
         "condition": cond_name,
         "sample": sample,
@@ -158,6 +159,7 @@ async def run_one(turn: dict, cond_name: str, sample: int, run_id: str, sem: asy
 
 
 async def main():
+    global replay_agent
     ap = argparse.ArgumentParser(description="Реплей ходов с пертурбациями контекста")
     ap.add_argument("--date", help="YYYY-MM-DD; по умолчанию все дни")
     ap.add_argument("--limit", type=int, help="взять только последние N ходов")
@@ -166,7 +168,15 @@ async def main():
                     help="через запятую: " + ", ".join(CONDITIONS))
     ap.add_argument("--concurrency", type=int, default=2)
     ap.add_argument("--run-id", default=None)
+    ap.add_argument("--model", default=None,
+                    help="другая модель вместо чат-агентовской (тот же клиент, промпт и настройки)")
     args = ap.parse_args()
+
+    if args.model:
+        from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
+        from src.handlers.checkin import ai_client
+        replay_agent = replay_agent.clone(
+            model=OpenAIChatCompletionsModel(model=args.model, openai_client=ai_client))
 
     conds = [c.strip() for c in args.conditions.split(",") if c.strip()]
     bad = [c for c in conds if c not in CONDITIONS]
@@ -181,6 +191,7 @@ async def main():
     total = len(turns) * len(conds) * args.k
     print(f"ходов: {len(turns)} × условий: {len(conds)} × сэмплов: {args.k} = {total} прогонов")
     print(f"run_id: {run_id} → {LOGS_DIR}/replay-{run_id}.jsonl")
+    print(f"модель: {getattr(replay_agent.model, 'model', replay_agent.model)}")
 
     new_turn(f"replay:{run_id}")   # чтобы вызовы в calls-*.jsonl были помечены
     sem = asyncio.Semaphore(args.concurrency)
