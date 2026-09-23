@@ -17,7 +17,7 @@ _user_names_cache: dict[int, str] = {}
 class RinResponse(BaseModel):
     text: str
     reaction: str | None = None
-    remember: list[str] | None = None
+    remember: list[str | dict] | None = None   # {"about": "author"|"self"|"other", "fact": ...} или строка (старый формат)
     forget: list[str] | None = None
     self_update: list[str] | None = None
     episode: str | None = None
@@ -29,7 +29,21 @@ class RinResponse(BaseModel):
             return None
         return str(v)
 
-    @field_validator("remember", "forget", "self_update", mode="before")
+    @field_validator("remember", mode="before")
+    @classmethod
+    def coerce_remember(cls, v):
+        # словари НЕ сплющиваем: в них поле about, по которому решается, чья это память
+        if v is None:
+            return v
+        out = []
+        for item in (v if isinstance(v, list) else [v]):
+            if isinstance(item, dict) and item.get("fact"):
+                out.append({"about": str(item.get("about") or "").strip().lower(), "fact": str(item["fact"]).strip()})
+            elif isinstance(item, str) and item.strip():
+                out.append(item.strip())
+        return out or None
+
+    @field_validator("forget", "self_update", mode="before")
     @classmethod
     def coerce_str_list(cls, v):
         if v is None:

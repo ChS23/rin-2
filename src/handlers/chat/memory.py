@@ -1,3 +1,4 @@
+import re as _re_mem
 import asyncio
 import datetime
 from pathlib import Path
@@ -52,6 +53,47 @@ async def remember_facts(user_id: int, user_name: str, facts: list[str]):
             if fact not in memory[uid]["facts"]:
                 memory[uid]["facts"].append(fact)
         save_memory(memory)
+
+
+_SELF_MARKERS = _re_mem.compile(r"\bрин\b|\b(я|мне|меня|мой|моя|моё|мои|мною)\b", _re_mem.IGNORECASE)
+
+
+def admit_remember(items: list, author_name: str) -> tuple[list[str], list[dict]]:
+    """Допуск фактов в карточку АВТОРА сообщения.
+
+    Раньше любой факт из remember падал в карточку того, кто написал, — так в карточке
+    Dante оказалось «Создала музыку… для пролога Dante» (это про саму Рин). Теперь модель
+    обязана сказать, про кого факт (about), и в карточку автора идёт только about=author.
+    Возвращает (принятые факты, журнал решений по каждому элементу).
+    """
+    accepted, log = [], []
+    for item in items or []:
+        if isinstance(item, dict):
+            about, fact = item.get("about", ""), item.get("fact", "")
+            if about == "author":
+                ok, reason = True, None
+            else:
+                ok, reason = False, f"about={about or 'пусто'}: не про автора"
+        else:  # старый формат — строка без указания, про кого
+            about, fact = "unspecified", item
+            m = _SELF_MARKERS.search(fact)
+            ok, reason = (False, f"похоже на факт про Рин ('{m.group(0)}')") if m else (True, None)
+        if ok:
+            accepted.append(fact)
+        log.append({"fact": fact, "about": about, "accepted": ok, "reason": reason, "subject": author_name})
+    return accepted, log
+
+
+def log_memory_ops(op: str, subject_uid: int, subject_name: str, entries: list[dict]):
+    """Происхождение каждой записи в память: кто, когда, в каком ходе, принято ли."""
+    try:
+        from src.handlers.chat.datalog import _append, current_turn_id, code_version, _now
+        for e in entries:
+            _append("memory", {"ts": _now().isoformat(), "op": op, "turn_id": current_turn_id(),
+                               "code_version": code_version(), "subject_uid": subject_uid,
+                               "subject_name": subject_name, **e})
+    except Exception:
+        pass
 
 
 async def forget_facts(user_id: int, facts: list[str]):

@@ -27,6 +27,7 @@ from src.handlers.chat.memory import (
     get_rin_self_state, refresh_rin_self_state, update_rin_self_state,
     update_last_seen, get_days_since, get_rin_gap_days,
     add_episode, get_episodes, refresh_all_reflections, dump_state_snapshot,
+    admit_remember, log_memory_ops,
 )
 from src.handlers.chat.utils import (
     resolve_user_name, parse_response, get_community_context, _looks_like_refusal, _sanitize_chat_text,
@@ -520,16 +521,25 @@ async def chat_with_rin(message: Message, by_name: bool = False):
             await logger.awarn("Не удалось поставить реакцию", error=str(e))
 
     if r.forget:
+        existing = set(get_user_memory(message.from_id))
         await forget_facts(message.from_id, r.forget)
+        log_memory_ops("forget", message.from_id, user_name,
+                       [{"fact": f, "accepted": f in existing,
+                         "reason": None if f in existing else "нет в карточке"} for f in r.forget])
     if r.remember:
-        await remember_facts(message.from_id, user_name, r.remember)
-        await maybe_compress_memory(message.from_id)
+        facts, decisions = admit_remember(r.remember, user_name)
+        log_memory_ops("remember", message.from_id, user_name, decisions)
+        if facts:
+            await remember_facts(message.from_id, user_name, facts)
+            await maybe_compress_memory(message.from_id)
     if r.self_update:
         current = await get_rin_self_state()
         merged = current + [s for s in r.self_update if s not in current]
         await update_rin_self_state(merged)
+        log_memory_ops("self_update", -GROUP_ID, "Рин", [{"fact": s, "accepted": True} for s in r.self_update])
     if r.episode:
         await add_episode(r.episode)
+        log_memory_ops("episode", -GROUP_ID, "Рин", [{"fact": r.episode, "accepted": True}])
 
     log_turn("chat", _ctx, {
         "silent": False,
