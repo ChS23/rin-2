@@ -1,7 +1,7 @@
 import structlog
 from agents import Agent, ModelSettings, RunHooks, Tool, RunConfig
 
-from src.handlers.checkin import ai_model
+from src.handlers.checkin import ai_model, NO_THINKING
 from src.handlers.creative.tools import creative_tools
 from src.handlers.audio.agent import audio_tool
 
@@ -9,7 +9,7 @@ _review_agent = Agent(
     model=ai_model,
     name="Рин (ревью сценария)",
     tools=[creative_tools[0], creative_tools[4]],  # read_file, grep_files
-    model_settings=ModelSettings(temperature=1.0, top_p=0.95, max_tokens=128_000, extra_body={"chat_template_kwargs": {"enable_thinking": False}}),  # v2.6: reasoning по умолчанию ВКЛ
+    model_settings=ModelSettings(temperature=1.0, top_p=0.95, max_tokens=128_000, extra_body=NO_THINKING),  # v2.6: reasoning по умолчанию ВКЛ
     instructions="""
     Ты — ревьюер сценария визуальной новеллы "Частота". Тебе передают файл или фрагмент сцены для анализа.
 
@@ -58,7 +58,7 @@ creative_agent = Agent(
     model=ai_model,
     name="Рин (creative)",
     tools=creative_tools + [audio_tool, _review_tool],
-    model_settings=ModelSettings(temperature=1.0, top_p=0.95, max_tokens=128_000, extra_body={"chat_template_kwargs": {"enable_thinking": False}}),  # v2.6: reasoning по умолчанию ВКЛ
+    model_settings=ModelSettings(temperature=1.0, top_p=0.95, max_tokens=128_000, extra_body=NO_THINKING),  # v2.6: reasoning по умолчанию ВКЛ
     instructions="""
     Ты — автономный агент-разработчик визуальной новеллы "Частота" на движке Ren'Py.
     Работаешь в автоматических сессиях. Между сессиями памяти нет — весь прогресс хранится только в файлах проекта и ROADMAP.md.

@@ -103,8 +103,11 @@ class ReplyToDailyMessage(ABCRule[Message]):
 
 scheduler = AsyncIOScheduler(timezone='Europe/Moscow')
 labeler = BotLabeler()
-# MiMo: reasoning ВЫКЛ через chat_template_kwargs.enable_thinking=false + рекоменд. top_p=0.95
-_glm_light = ModelSettings(temperature=1.0, top_p=0.95, max_tokens=32_000, extra_body={"chat_template_kwargs": {"enable_thinking": False}})
+# MiMo: reasoning ВЫКЛ. Документированный параметр — thinking.type=disabled; старый
+# chat_template_kwargs.enable_thinking=false тоже работает (проверено на v2.6, 23.09.2026).
+# Шлём оба: если провайдер перестанет понимать один, второй удержит режим.
+NO_THINKING = {"thinking": {"type": "disabled"}, "chat_template_kwargs": {"enable_thinking": False}}
+_glm_light = ModelSettings(temperature=1.0, top_p=0.95, max_tokens=32_000, extra_body=NO_THINKING)
 
 midday_agent = Agent(
     model=ai_model,

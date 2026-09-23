@@ -8,7 +8,7 @@ Audio Agent — генерирует музыку и звуки через agent
 import structlog
 from agents import Agent, ModelSettings, RunHooks, Tool, RunConfig
 
-from src.handlers.checkin import ai_model
+from src.handlers.checkin import ai_model, NO_THINKING
 from src.handlers.audio.tools import audio_tools
 
 logger = structlog.get_logger("audio.agent")
@@ -40,7 +40,7 @@ audio_agent = Agent(
     model_settings=ModelSettings(
         temperature=1.0, top_p=0.95, max_tokens=128_000,
         parallel_tool_calls=False,                      # слои последовательно — никакого шторма рендеров
-        extra_body={"chat_template_kwargs": {"enable_thinking": False}},  # reasoning OFF (MiMo-формат) → шаги быстрее
+        extra_body=NO_THINKING,  # reasoning OFF (MiMo-формат) → шаги быстрее
     ),
     instructions="""
     Ты -- опытный саунд-дизайнер и DSP-инженер. Превращаешь текстовые описания в атмосферное аудио.
